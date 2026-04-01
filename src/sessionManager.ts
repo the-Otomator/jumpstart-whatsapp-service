@@ -1,11 +1,16 @@
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
+  makeCacheableSignalKeyStore,
+  fetchLatestBaileysVersion,
 } from '@whiskeysockets/baileys'
 import { Boom } from '@hapi/boom'
 import QRCode from 'qrcode'
+import pino from 'pino'
 import path from 'path'
 import { Session } from './types'
+
+const logger = pino({ level: 'silent' })
 
 export const sessions = new Map<string, Session>()
 export const sockets = new Map<string, ReturnType<typeof makeWASocket>>()
@@ -21,13 +26,29 @@ async function postWebhook(webhookUrl: string, payload: object): Promise<void> {
 }
 
 export async function startSession(orgId: string, webhookUrl?: string): Promise<void> {
+  // Clean up any existing session first
+  if (sockets.has(orgId)) {
+    sockets.get(orgId)?.end(undefined)
+    sockets.delete(orgId)
+  }
+
   const session: Session = { orgId, status: 'connecting', webhookUrl }
   sessions.set(orgId, session)
 
   const authDir = path.join(process.cwd(), 'sessions', orgId)
   const { state, saveCreds } = await useMultiFileAuthState(authDir)
+  const { version } = await fetchLatestBaileysVersion()
 
-  const sock = makeWASocket({ auth: state, printQRInTerminal: false })
+  const sock = makeWASocket({
+    version,
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, logger),
+    },
+    logger,
+    printQRInTerminal: false,
+    generateHighQualityLinkPreview: false,
+  })
   sockets.set(orgId, sock)
 
   sock.ev.on('creds.update', saveCreds)
@@ -46,10 +67,14 @@ export async function startSession(orgId: string, webhookUrl?: string): Promise<
       if (webhookUrl) await postWebhook(webhookUrl, { event: 'connected', orgId, phone: session.phoneNumber })
     }
     if (connection === 'close') {
-      const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut
+      const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
       session.status = 'disconnected'
       if (webhookUrl) await postWebhook(webhookUrl, { event: 'disconnected', orgId })
-      if (shouldReconnect) setTimeout(() => startSession(orgId, webhookUrl), 5000)
+      if (statusCode !== DisconnectReason.loggedOut) {
+        setTimeout(() => startSession(orgId, webhookUrl), 5000)
+      } else {
+        sockets.delete(orgId)
+      }
     }
   })
 }
