@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { sessions, sockets } from '../sessionManager'
 import { SendMessageRequest } from '../types'
+import { validateBody, sendMessageSchema, sendBulkSchema } from '../middleware/validate'
 
 const router = Router()
 
@@ -16,11 +17,22 @@ async function sendOne(req: SendMessageRequest): Promise<string> {
   }
   const sock = sockets.get(req.orgId)!
   const jid = formatJid(req.to)
-  const result = await sock.sendMessage(jid, { text: req.message })
+
+  // Media message
+  if (req.mediaUrl) {
+    const result = await sock.sendMessage(jid, {
+      image: { url: req.mediaUrl },
+      caption: req.caption ?? req.message,
+    })
+    return result?.key?.id ?? ''
+  }
+
+  // Text message
+  const result = await sock.sendMessage(jid, { text: req.message! })
   return result?.key?.id ?? ''
 }
 
-router.post('/send', async (req: Request, res: Response) => {
+router.post('/send', validateBody(sendMessageSchema), async (req: Request, res: Response) => {
   const body = req.body as SendMessageRequest
   try {
     const messageId = await sendOne(body)
@@ -32,7 +44,7 @@ router.post('/send', async (req: Request, res: Response) => {
   }
 })
 
-router.post('/send-bulk', async (req: Request, res: Response) => {
+router.post('/send-bulk', validateBody(sendBulkSchema), async (req: Request, res: Response) => {
   const messages = req.body as SendMessageRequest[]
   const results: { to: string; success: boolean; messageId?: string; error?: string }[] = []
 

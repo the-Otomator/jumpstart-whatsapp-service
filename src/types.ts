@@ -8,7 +8,22 @@ export interface Session {
 
 export interface SendMessageRequest {
   orgId: string
-  to: string        // phone number with country code, e.g. "972501234567"
-  message: string
+  to: string
+  message?: string
   mediaUrl?: string
+  caption?: string
+}
+
+export interface IncomingMessage {
+  event: 'message'
+  orgId: string
+  from: string
+  pushName?: string
+  messageId: string
+  timestamp: number
+  type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'other'
+  text?: string
+  mediaUrl?: string
+  mimetype?: string
+  caption?: string
 }

@@ -1,9 +1,10 @@
 import { Router, Request, Response } from 'express'
 import { startSession, getQR, getStatus, stopSession } from '../sessionManager'
+import { validateBody, startSessionSchema } from '../middleware/validate'
 
 const router = Router()
 
-router.post('/:orgId/start', async (req: Request, res: Response) => {
+router.post('/:orgId/start', validateBody(startSessionSchema), async (req: Request, res: Response) => {
   const { orgId } = req.params
   const { webhookUrl } = req.body
   try {
