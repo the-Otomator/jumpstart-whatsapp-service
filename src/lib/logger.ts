@@ -1,16 +1,20 @@
 import pino from 'pino'
 
+const level = process.env.LOG_LEVEL ?? (process.env.NODE_ENV === 'production' ? 'info' : 'debug')
+
 export const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-  transport:
-    process.env.NODE_ENV !== 'production'
-      ? { target: 'pino-pretty', options: { colorize: true } }
-      : undefined,
+  level,
+  transport: process.env.NODE_ENV !== 'production'
+    ? { target: 'pino/file', options: { destination: 1 } } // stdout in dev
+    : undefined,
+  formatters: {
+    level: (label) => ({ level: label }),
+  },
+  timestamp: pino.stdTimeFunctions.isoTime,
+  base: { service: 'whatsapp-service' },
 })
 
-/** Baileys-compatible silent logger (suppresses internal noise) */
-export const baileysLogger = pino({ level: 'silent' })
-
-export function childLogger(name: string, extra?: Record<string, unknown>) {
-  return logger.child({ module: name, ...extra })
+/** Create a child logger scoped to a specific org */
+export function orgLogger(orgId: string) {
+  return logger.child({ orgId })
 }

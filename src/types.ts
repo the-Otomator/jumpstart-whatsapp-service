@@ -6,24 +6,25 @@ export interface Session {
   webhookUrl?: string
 }
 
+export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'document' | 'location' | 'contact'
+
 export interface SendMessageRequest {
   orgId: string
-  to: string
-  message?: string
-  mediaUrl?: string
-  caption?: string
+  to: string                // phone number with country code, e.g. "972501234567"
+  type: MessageType
+  message?: string          // text content or caption for media
+  mediaUrl?: string         // URL to download media from
+  mediaBase64?: string      // direct base64-encoded media
+  mimetype?: string         // e.g. "application/pdf"
+  filename?: string         // for documents
+  latitude?: number         // for location
+  longitude?: number
+  contactName?: string      // for contact card
+  contactPhone?: string
 }
 
-export interface IncomingMessage {
-  event: 'message'
-  orgId: string
-  from: string
-  pushName?: string
-  messageId: string
-  timestamp: number
-  type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'other'
-  text?: string
-  mediaUrl?: string
-  mimetype?: string
-  caption?: string
+export interface ApiError {
+  error: string
+  code: string
+  details?: unknown
 }

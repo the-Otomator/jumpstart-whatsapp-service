@@ -1,42 +1,69 @@
 import fs from 'fs'
 import path from 'path'
-import { childLogger } from './logger'
+import { logger } from './logger'
 
-const log = childLogger('sessionStore')
-
-export interface StoredSession {
+export interface SessionMeta {
   orgId: string
   webhookUrl?: string
+  createdAt: string
+  phoneNumber?: string
+  lastConnected?: string
+  autoRestore: boolean
 }
 
-const STORE_PATH = path.join(process.cwd(), 'sessions', '_store.json')
+const SESSIONS_DIR = path.join(process.cwd(), 'sessions')
 
-function ensureDir(): void {
-  const dir = path.dirname(STORE_PATH)
+function metaPath(orgId: string): string {
+  return path.join(SESSIONS_DIR, orgId, 'meta.json')
+}
+
+/** Save session metadata to disk */
+export function saveSessionMeta(meta: SessionMeta): void {
+  const dir = path.join(SESSIONS_DIR, meta.orgId)
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+
+  fs.writeFileSync(metaPath(meta.orgId), JSON.stringify(meta, null, 2), 'utf-8')
+  logger.debug({ orgId: meta.orgId }, 'Session metadata saved')
 }
 
-export function saveSessionMeta(orgId: string, webhookUrl?: string): void {
-  const all = loadAllSessions()
-  all[orgId] = { orgId, webhookUrl }
-  ensureDir()
-  fs.writeFileSync(STORE_PATH, JSON.stringify(all, null, 2))
-  log.debug({ orgId }, 'session meta saved')
-}
+/** Load session metadata from disk */
+export function loadSessionMeta(orgId: string): SessionMeta | null {
+  const filePath = metaPath(orgId)
+  if (!fs.existsSync(filePath)) return null
 
-export function removeSessionMeta(orgId: string): void {
-  const all = loadAllSessions()
-  delete all[orgId]
-  ensureDir()
-  fs.writeFileSync(STORE_PATH, JSON.stringify(all, null, 2))
-  log.debug({ orgId }, 'session meta removed')
-}
-
-export function loadAllSessions(): Record<string, StoredSession> {
   try {
-    const raw = fs.readFileSync(STORE_PATH, 'utf-8')
-    return JSON.parse(raw)
-  } catch {
-    return {}
+    const raw = fs.readFileSync(filePath, 'utf-8')
+    return JSON.parse(raw) as SessionMeta
+  } catch (err) {
+    logger.warn({ orgId, err }, 'Failed to read session metadata')
+    return null
   }
+}
+
+/** Update specific fields in session metadata */
+export function updateSessionMeta(orgId: string, updates: Partial<SessionMeta>): void {
+  const existing = loadSessionMeta(orgId)
+  if (!existing) return
+
+  const updated = { ...existing, ...updates }
+  saveSessionMeta(updated)
+}
+
+/** Delete session metadata from disk */
+export function deleteSessionMeta(orgId: string): void {
+  const filePath = metaPath(orgId)
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath)
+    logger.debug({ orgId }, 'Session metadata deleted')
+  }
+}
+
+/** List all org IDs that have session directories (for auto-restore) */
+export function listStoredSessions(): string[] {
+  if (!fs.existsSync(SESSIONS_DIR)) return []
+
+  return fs.readdirSync(SESSIONS_DIR).filter((name) => {
+    const dir = path.join(SESSIONS_DIR, name)
+    return fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, 'creds.json'))
+  })
 }

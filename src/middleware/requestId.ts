@@ -9,9 +9,7 @@ declare global {
   }
 }
 
-export function requestIdMiddleware(req: Request, res: Response, next: NextFunction): void {
-  const id = (req.headers['x-request-id'] as string) ?? crypto.randomUUID()
-  req.requestId = id
-  res.setHeader('x-request-id', id)
+export function requestIdMiddleware(req: Request, _res: Response, next: NextFunction): void {
+  req.requestId = (req.headers['x-request-id'] as string) ?? crypto.randomUUID()
   next()
 }
