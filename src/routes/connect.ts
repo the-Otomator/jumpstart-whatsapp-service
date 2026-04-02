@@ -241,6 +241,7 @@ function renderConnectPage(orgId: string): string {
     const orgId = '${orgId}';
     let currentState = 'loading';
     let pollInterval;
+    let notFoundCount = 0;
 
     function setState(state) {
       if (state === currentState) return;
@@ -257,15 +258,18 @@ function renderConnectPage(orgId: string): string {
 
         switch (data.status) {
           case 'qr':
+            notFoundCount = 0;
             setState('qr');
             if (data.qr) {
               document.getElementById('qr-image').src = data.qr;
             }
             break;
           case 'connecting':
+            notFoundCount = 0;
             setState('connecting');
             break;
           case 'connected':
+            notFoundCount = 0;
             setState('connected');
             const phone = data.phoneNumber || '';
             document.getElementById('phone-display').textContent =
@@ -277,8 +281,12 @@ function renderConnectPage(orgId: string): string {
             clearInterval(pollInterval);
             break;
           case 'not_found':
-            setState('not_found');
-            clearInterval(pollInterval);
+            // Keep polling for up to 15s — session may still be initializing
+            notFoundCount++;
+            if (notFoundCount > 7) {
+              setState('not_found');
+              clearInterval(pollInterval);
+            }
             break;
         }
       } catch (err) {
@@ -286,9 +294,11 @@ function renderConnectPage(orgId: string): string {
       }
     }
 
-    // Start polling
-    poll();
-    pollInterval = setInterval(poll, 2000);
+    // Small delay before first poll to let session initialize
+    setTimeout(() => {
+      poll();
+      pollInterval = setInterval(poll, 2000);
+    }, 1500);
   </script>
 </body>
 </html>`
