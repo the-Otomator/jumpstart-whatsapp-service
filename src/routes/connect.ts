@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { getQR, getStatus, startSession } from '../sessionManager'
 import { orgLogger } from '../lib/logger'
+import { validateOrg } from '../lib/supabase'
 
 const router = Router()
 
@@ -13,6 +14,12 @@ const router = Router()
 router.get('/:orgId', async (req: Request, res: Response) => {
   const { orgId } = req.params
   const log = orgLogger(orgId)
+
+  const orgCheck = await validateOrg(orgId)
+  if (!orgCheck.valid) {
+    res.status(403).send(renderErrorPage(orgId, 'אין מנוי פעיל לארגון זה'))
+    return
+  }
 
   // Auto-start session if not already running
   const status = getStatus(orgId)
@@ -300,6 +307,32 @@ function renderConnectPage(orgId: string): string {
       pollInterval = setInterval(poll, 2000);
     }, 1500);
   </script>
+</body>
+</html>`
+}
+
+function renderErrorPage(orgId: string, message: string): string {
+  return `<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>שגיאה — ${orgId}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #fafafa; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .card { background: #141414; border: 1px solid #2a2a2a; border-radius: 16px; padding: 40px; max-width: 440px; width: 90%; text-align: center; }
+    .icon { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 12px; }
+    p { color: #888; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">🚫</div>
+    <h1>${message}</h1>
+    <p>צור קשר עם מנהל המערכת</p>
+  </div>
 </body>
 </html>`
 }

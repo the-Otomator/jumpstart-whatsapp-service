@@ -8,6 +8,7 @@ import {
 } from '../middleware/validate'
 import { getWebhookFailures, clearWebhookFailures } from '../lib/webhookDispatcher'
 import { orgLogger } from '../lib/logger'
+import { validateOrg } from '../lib/supabase'
 
 const router = Router()
 
@@ -26,6 +27,15 @@ router.post(
     const { orgId } = req.params
     const { webhookUrl } = req.body
     const log = orgLogger(orgId)
+
+    const orgCheck = await validateOrg(orgId)
+    if (!orgCheck.valid) {
+      res.status(403).json({
+        error: 'No active subscription for this organization',
+        code: 'ORG_NOT_AUTHORIZED',
+      })
+      return
+    }
 
     try {
       await startSession(orgId, webhookUrl)
