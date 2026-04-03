@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Otomator Ecosystem — Architecture Overview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0a0a0a; color: #e0e0e0;
+    line-height: 1.6; padding: 32px;
+  }
+  h1 { font-size: 28px; color: #fff; margin-bottom: 8px; text-align: center; }
+  .subtitle { text-align: center; color: #888; margin-bottom: 40px; font-size: 14px; }
+
+  /* Architecture Diagram */
+  .diagram {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 24px; margin-bottom: 48px; max-width: 1100px; margin-inline: auto;
+  }
+  .layer {
+    display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;
+    width: 100%; position: relative;
+  }
+  .layer-label {
+    position: absolute; top: -18px; right: 0;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px;
+    color: #555; font-weight: 600;
+  }
+  .node {
+    background: #141414; border: 1px solid #2a2a2a; border-radius: 14px;
+    padding: 20px 24px; min-width: 200px; max-width: 320px;
+    flex: 1; position: relative; transition: border-color 0.2s;
+  }
+  .node:hover { border-color: #444; }
+  .node-icon { font-size: 28px; margin-bottom: 8px; }
+  .node-name { font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .node-domain { font-size: 12px; color: #666; font-family: monospace; margin-bottom: 10px; direction: ltr; text-align: right; }
+  .node-desc { font-size: 13px; color: #999; }
+  .node-stack {
+    margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .tag {
+    font-size: 10px; background: #1a1a2e; color: #7c8cf5; padding: 2px 8px;
+    border-radius: 6px; border: 1px solid #2a2a4a; white-space: nowrap;
+  }
+  .tag.green { background: #0d2818; color: #4ade80; border-color: #1a3d2a; }
+  .tag.amber { background: #2a1f0d; color: #fbbf24; border-color: #3d2f1a; }
+  .tag.red { background: #2a0d0d; color: #f87171; border-color: #3d1a1a; }
+  .tag.cyan { background: #0d2a2a; color: #22d3ee; border-color: #1a3d3d; }
+
+  /* Status badges */
+  .status { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot.live { background: #4ade80; box-shadow: 0 0 6px #4ade8066; }
+  .dot.wip { background: #fbbf24; box-shadow: 0 0 6px #fbbf2466; }
+  .dot.planned { background: #888; }
+
+  /* Arrows */
+  .arrows {
+    display: flex; gap: 40px; justify-content: center; align-items: center;
+    padding: 8px 0; color: #444; font-size: 20px;
+  }
+  .arrow-label { font-size: 11px; color: #666; text-align: center; }
+
+  /* Flow section */
+  .section { max-width: 900px; margin: 0 auto 48px; }
+  .section h2 {
+    font-size: 20px; color: #fff; margin-bottom: 20px;
+    padding-bottom: 8px; border-bottom: 1px solid #222;
+  }
+
+  /* Flow diagram */
+  .flow {
+    display: flex; flex-direction: column; gap: 0;
+    background: #111; border-radius: 14px; padding: 24px; border: 1px solid #222;
+  }
+  .flow-step {
+    display: flex; align-items: flex-start; gap: 16px; padding: 12px 0;
+  }
+  .flow-num {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: #1a1a2e; color: #7c8cf5; font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    border: 1px solid #2a2a4a;
+  }
+  .flow-content { flex: 1; }
+  .flow-title { font-size: 14px; font-weight: 600; color: #ddd; }
+  .flow-detail { font-size: 12px; color: #777; margin-top: 2px; }
+  .flow-system { font-family: monospace; color: #7c8cf5; font-size: 11px; }
+  .flow-connector {
+    width: 28px; display: flex; justify-content: center;
+    padding: 0; margin: -4px 0;
+  }
+  .flow-connector::after {
+    content: ''; display: block; width: 2px; height: 16px; background: #2a2a4a;
+  }
+
+  /* Table */
+  .gap-table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  .gap-table th {
+    text-align: right; padding: 10px 12px; border-bottom: 2px solid #222;
+    color: #888; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  }
+  .gap-table td {
+    padding: 10px 12px; border-bottom: 1px solid #1a1a1a; vertical-align: top;
+  }
+  .gap-table tr:hover td { background: #111; }
+
+  /* Data model */
+  .db-table {
+    background: #111; border: 1px solid #222; border-radius: 10px;
+    overflow: hidden; margin-bottom: 16px;
+  }
+  .db-header {
+    background: #1a1a2e; padding: 10px 16px; font-weight: 700; font-size: 14px;
+    color: #7c8cf5; border-bottom: 1px solid #2a2a4a;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .db-rows { padding: 8px 0; }
+  .db-row {
+    padding: 4px 16px; font-size: 12px; font-family: monospace;
+    display: flex; gap: 12px; color: #999;
+  }
+  .db-col { color: #ddd; min-width: 160px; }
+  .db-type { color: #666; }
+  .db-pk { color: #fbbf24; font-size: 10px; }
+  .db-fk { color: #22d3ee; font-size: 10px; }
+
+  /* Legend */
+  .legend {
+    display: flex; gap: 24px; justify-content: center; margin-bottom: 32px;
+    font-size: 12px; color: #666;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+
+  @media (max-width: 768px) {
+    body { padding: 16px; }
+    .layer { flex-direction: column; align-items: stretch; }
+    .node { max-width: none; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Otomator Ecosystem — Architecture</h1>
+<p class="subtitle">WhatsApp Service integration architecture · April 2026</p>
+
+<div class="legend">
+  <div class="legend-item"><span class="dot live"></span> Live</div>
+  <div class="legend-item"><span class="dot wip"></span> In Progress</div>
+  <div class="legend-item"><span class="dot planned"></span> Planned</div>
+</div>
+
+<!-- ===== ARCHITECTURE DIAGRAM ===== -->
+<div class="diagram">
+
+  <!-- Layer: Admin -->
+  <div class="layer">
+    <div class="layer-label">ADMIN LAYER</div>
+    <div class="node" style="border-color: #2a2a4a;">
+      <div class="node-icon">🏢</div>
+      <div class="node-name">Otomator Admin</div>
+      <div class="node-domain">otomator-admin.pages.dev</div>
+      <div class="node-desc">
+        Nizan's central portal. Manages all products, subscriptions, and licenses across the entire Otomator ecosystem. Views all WhatsApp instances and their health.
+      </div>
+      <div class="node-stack">
+        <span class="tag">Cloudflare Pages</span>
+        <span class="tag">Supabase</span>
+        <span class="tag">Edge Functions</span>
+      </div>
+      <div class="status"><span class="dot live"></span> Live</div>
+    </div>
+  </div>
+
+  <div class="arrows">↕</div>
+
+  <!-- Layer: Services -->
+  <div class="layer">
+    <div class="layer-label">SERVICE LAYER</div>
+
+    <div class="node" style="border-color: #1a3d2a;">
+      <div class="node-icon">💬</div>
+      <div class="node-name">WhatsApp Service</div>
+      <div class="node-domain">wa.otomator.pro</div>
+      <div class="node-desc">
+        Standalone multi-tenant WhatsApp engine. One session per org. REST API + public QR connect page. Designed to be independent — future external customers.
+      </div>
+      <div class="node-stack">
+        <span class="tag green">Node.js</span>
+        <span class="tag green">Baileys 6.x</span>
+        <span class="tag green">Express</span>
+        <span class="tag green">Docker</span>
+      </div>
+      <div class="status"><span class="dot live"></span> Live on VPS</div>
+    </div>
+
+    <div class="node" style="border-color: #3d2f1a;">
+      <div class="node-icon">💳</div>
+      <div class="node-name">SUMIT</div>
+      <div class="node-domain">sumit.co.il</div>
+      <div class="node-desc">
+        Israeli payment gateway. Handles purchases and recurring billing. Webhook on successful payment triggers org provisioning.
+      </div>
+      <div class="node-stack">
+        <span class="tag amber">Payment API</span>
+        <span class="tag amber">Webhooks</span>
+      </div>
+      <div class="status"><span class="dot wip"></span> Integration planned</div>
+    </div>
+
+    <div class="node" style="border-color: #222;">
+      <div class="node-icon">🗄️</div>
+      <div class="node-name">Supabase</div>
+      <div class="node-domain">mzalzjtsyrjycaxolldv.supabase.co</div>
+      <div class="node-desc">
+        Shared database — source of truth for products, subscriptions, and org authorization. Used by Admin, Hub, and WhatsApp Service.
+      </div>
+      <div class="node-stack">
+        <span class="tag cyan">PostgreSQL</span>
+        <span class="tag cyan">Edge Functions</span>
+        <span class="tag cyan">Auth</span>
+      </div>
+      <div class="status"><span class="dot live"></span> Live</div>
+    </div>
+  </div>
+
+  <div class="arrows">↕</div>
+
+  <!-- Layer: Client -->
+  <div class="layer">
+    <div class="layer-label">CLIENT LAYER</div>
+    <div class="node" style="border-color: #2a1a3d;">
+      <div class="node-icon">🏠</div>
+      <div class="node-name">JumpStart Hub</div>
+      <div class="node-domain">hub.jumpstart.co.il</div>
+      <div class="node-desc">
+        Client-facing portal. Each customer manages their business here. Module system — WhatsApp module lets them connect/manage their device. Other modules locked until upgrade.
+      </div>
+      <div class="node-stack">
+        <span class="tag">Client Portal</span>
+        <span class="tag">Module System</span>
+      </div>
+      <div class="status"><span class="dot live"></span> Live (WhatsApp module: <span style="color:#fbbf24">WIP</span>)</div>
+    </div>
+  </div>
+
+  <div class="arrows">↕</div>
+
+  <!-- Layer: Automation -->
+  <div class="layer">
+    <div class="layer-label">AUTOMATION LAYER</div>
+    <div class="node" style="border-color: #1a1a1a; max-width: 600px;">
+      <div class="node-icon">⚡</div>
+      <div class="node-name">External Consumers</div>
+      <div class="node-desc" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:4px;">
+        <span class="tag">n8n</span>
+        <span class="tag">Make.com</span>
+        <span class="tag">Supabase Edge Functions</span>
+        <span class="tag">Future: 3rd-party apps</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PROVISIONING FLOW ===== -->
+<div class="section">
+  <h2>🛒 Provisioning Flow — New Customer Purchase</h2>
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-num">1</div>
+      <div class="flow-content">
+        <div class="flow-title">Customer lands on purchase/signup page</div>
+        <div class="flow-detail">Self-service or via referral. Chooses WhatsApp Service plan.</div>
+      </div>
+    </div>
+    <div class="flow-connector"></div>
+    <div class="flow-step">
+      <div class="flow-num">2</div>
+      <div class="flow-content">
+        <div class="flow-title">Payment via SUMIT</div>
+        <div class="flow-detail">Customer enters credit card. SUMIT processes payment and fires webhook.</div>
+        <div class="flow-system">→ SUMIT webhook → automation endpoint</div>
+      </div>
+    </div>
+    <div class="flow-connector"></div>
+    <div class="flow-step">
+      <div class="flow-num">3</div>
+      <div class="flow-content">
+        <div class="flow-title">Org provisioning (automated)</div>
+        <div class="flow-detail">Webhook triggers creation of:
+          <br>• <strong>Supabase:</strong> new row in <code>central_subscriptions</code> with generated <code>org_id</code>
+          <br>• <strong>JumpStart:</strong> new business owner account with WhatsApp module unlocked
+        </div>
+        <div class="flow-system">→ Supabase INSERT + JumpStart account creation</div>
+      </div>
+    </div>
+    <div class="flow-connector"></div>
+    <div class="flow-step">
+      <div class="flow-num">4</div>
+      <div class="flow-content">
+        <div class="flow-title">Customer receives login + setup instructions</div>
+        <div class="flow-detail">Email with JumpStart Hub credentials. Links to connect their WhatsApp device.</div>
+        <div class="flow-system">→ Email via SUMIT or automation</div>
+      </div>
+    </div>
+    <div class="flow-connector"></div>
+    <div class="flow-step">
+      <div class="flow-num">5</div>
+      <div class="flow-content">
+        <div class="flow-title">Customer connects WhatsApp in Hub</div>
+        <div class="flow-detail">Opens WhatsApp module → clicks "Connect device" → scans QR in iframe from <code>wa.otomator.pro/connect/:orgId</code></div>
+        <div class="flow-system">→ JumpStart Hub → WhatsApp Service</div>
+      </div>
+    </div>
+    <div class="flow-connector"></div>
+    <div class="flow-step">
+      <div class="flow-num">6</div>
+      <div class="flow-content">
+        <div class="flow-title">Instance appears in Otomator Admin</div>
+        <div class="flow-detail">Nizan sees the new session in admin panel. Can monitor health, disconnect, manage subscription.</div>
+        <div class="flow-system">→ Otomator Admin reads WhatsApp API + Supabase</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== DATA MODEL ===== -->
+<div class="section">
+  <h2>🗃️ Supabase Data Model (otomator-admin)</h2>
+
+  <div class="db-table">
+    <div class="db-header">📦 products</div>
+    <div class="db-rows">
+      <div class="db-row"><span class="db-col">id</span><span class="db-type">uuid</span><span class="db-pk">PK</span></div>
+      <div class="db-row"><span class="db-col">slug</span><span class="db-type">text unique</span> <span style="color:#4ade80">e.g. 'whatsapp-service'</span></div>
+      <div class="db-row"><span class="db-col">name</span><span class="db-type">text</span></div>
+      <div class="db-row"><span class="db-col">description</span><span class="db-type">text</span></div>
+      <div class="db-row"><span class="db-col">created_at</span><span class="db-type">timestamptz</span></div>
+    </div>
+  </div>
+
+  <div class="db-table">
+    <div class="db-header">📋 central_subscriptions</div>
+    <div class="db-rows">
+      <div class="db-row"><span class="db-col">id</span><span class="db-type">uuid</span><span class="db-pk">PK</span></div>
+      <div class="db-row"><span class="db-col">product_id</span><span class="db-type">uuid</span><span class="db-fk">FK → products.id</span></div>
+      <div class="db-row"><span class="db-col">org_id</span><span class="db-type">text unique</span> <span style="color:#fbbf24">key identifier for WhatsApp Service</span></div>
+      <div class="db-row"><span class="db-col">organization_name</span><span class="db-type">text</span></div>
+      <div class="db-row"><span class="db-col">user_email</span><span class="db-type">text</span></div>
+      <div class="db-row"><span class="db-col">plan</span><span class="db-type">text</span> <span style="color:#999">e.g. 'basic', 'pro'</span></div>
+      <div class="db-row"><span class="db-col">status</span><span class="db-type">text</span> <span style="color:#999">'active' | 'cancelled' | 'expired'</span></div>
+      <div class="db-row"><span class="db-col">sumit_token</span><span class="db-type">text</span> <span style="color:#999">for recurring charges</span></div>
+      <div class="db-row"><span class="db-col">started_at</span><span class="db-type">timestamptz</span></div>
+      <div class="db-row"><span class="db-col">expires_at</span><span class="db-type">timestamptz</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== WHAT'S BUILT vs GAPS ===== -->
+<div class="section">
+  <h2>📊 Status — What Exists vs. What's Needed</h2>
+  <table class="gap-table">
+    <thead>
+      <tr>
+        <th>Component</th>
+        <th>Status</th>
+        <th>What's Done</th>
+        <th>What's Missing</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="color:#fff; font-weight:600;">WhatsApp Service</td>
+        <td><span class="tag green">Live</span></td>
+        <td>API, QR connect, session persistence, Docker, SSL</td>
+        <td>Supabase org validation (TASK-1 ready)</td>
+      </tr>
+      <tr>
+        <td style="color:#fff; font-weight:600;">Supabase Schema</td>
+        <td><span class="tag green">Live</span></td>
+        <td><code>products</code> + <code>central_subscriptions</code> tables, <code>org_id</code> column</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td style="color:#fff; font-weight:600;">Otomator Admin</td>
+        <td><span class="tag green">Live</span></td>
+        <td>Portal exists on Cloudflare Pages</td>
+        <td>WhatsApp sessions page (HANDOFF-A ready)</td>
+      </tr>
+      <tr>
+        <td style="color:#fff; font-weight:600;">JumpStart Hub</td>
+        <td><span class="tag green">Live</span></td>
+        <td>Portal live, module system works</td>
+        <td>WhatsApp module (HANDOFF-B ready)</td>
+      </tr>
+      <tr>
+        <td style="color:#fff; font-weight:600;">SUMIT Integration</td>
+        <td><span class="tag amber">Planned</span></td>
+        <td>—</td>
+        <td>Purchase page, webhook handler, auto-provisioning flow</td>
+      </tr>
+      <tr>
+        <td style="color:#fff; font-weight:600;">Auto-Provisioning</td>
+        <td><span class="tag amber">Planned</span></td>
+        <td>—</td>
+        <td>Automation: SUMIT webhook → Supabase row + JumpStart account creation</td>
+      </tr>
+      <tr>
+        <td style="color:#fff; font-weight:600;">Welcome Email</td>
+        <td><span class="tag planned" style="background:#1a1a1a; color:#888; border-color:#333;">Planned</span></td>
+        <td>—</td>
+        <td>Email with Hub credentials + setup guide</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===== BUILD ORDER ===== -->
+<div class="section">
+  <h2>🔨 Recommended Build Order</h2>
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-num" style="background:#0d2818; color:#4ade80; border-color:#1a3d2a;">1</div>
+      <div class="flow-content">
+        <div class="flow-title">TASK-1: Supabase org validation in WhatsApp Service</div>
+        <div class="flow-detail">Task file ready. Ensures only orgs with active subscriptions can connect.</div>
+      </div>
+    </div>
+    <div class="flow-connector"></div>
+    <div class="flow-step">
+      <div class="flow-num" style="background:#0d2818; color:#4ade80; border-color:#1a3d2a;">2</div>
+      <div class="flow-content">
+        <div class="flow-title">HANDOFF-A: WhatsApp sessions page in Otomator Admin</div>
+        <div class="flow-detail">Handoff doc ready. Edge Function proxy + sessions table + health banner.</div>
+      </div>
+    </div>
+    <div class="flow-connector"></div>
+    <div class="flow-step">
+      <div class="flow-num" style="background:#2a1f0d; color:#fbbf24; border-color:#3d2f1a;">3</div>
+      <div class="flow-content">
+        <div class="flow-title">SUMIT purchase page + webhook handler</div>
+        <div class="flow-detail">Landing page with plan selection → SUMIT checkout → webhook to n8n/Make/Edge Function.</div>
+      </div>
+    </div>
+    <div class="flow-connector"></div>
+    <div class="flow-step">
+      <div class="flow-num" style="background:#2a1f0d; color:#fbbf24; border-color:#3d2f1a;">4</div>
+      <div class="flow-content">
+        <div class="flow-title">Auto-provisioning automation</div>
+        <div class="flow-detail">On payment success: create Supabase subscription + JumpStart account + send welcome email.</div>
+      </div>
+    </div>
+    <div class="flow-connector"></div>
+    <div class="flow-step">
+      <div class="flow-num" style="background:#1a0d2a; color:#a78bfa; border-color:#2a1a3d;">5</div>
+      <div class="flow-content">
+        <div class="flow-title">HANDOFF-B: WhatsApp module in JumpStart Hub</div>
+        <div class="flow-detail">Handoff doc ready. Device management UI + iframe for QR connect.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p style="text-align:center; color:#444; font-size:11px; margin-top:40px;">
+  Generated April 2, 2026 · Otomator Architecture Overview
+</p>
+
+</body>
+</html>

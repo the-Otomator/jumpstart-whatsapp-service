@@ -38,7 +38,7 @@ docker builder prune -af
 echo ""
 echo "▶ [3/6] Pulling latest code from git..."
 git fetch origin
-git reset --hard origin/feature/production-hardening
+git reset --hard origin/feature/supabase-org-validation
 echo "  Branch: $(git branch --show-current)"
 echo "  Commit: $(git log --oneline -1)"
 
