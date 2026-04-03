@@ -32,36 +32,66 @@ export async function validateOrg(orgId: string): Promise<{
   }
 
   try {
-    const { data, error } = await supabase
+    const { data: central, error: centralErr } = await supabase
       .from('central_subscriptions')
       .select('org_id, plan, status, user_email, organization_name, product_id')
       .eq('org_id', orgId)
       .eq('status', 'active')
-      .single()
+      .maybeSingle()
 
-    if (error || !data) {
-      logger.info({ orgId }, 'No active subscription found for org')
-      return { valid: false }
+    if (central && !centralErr) {
+      const { data: product } = await supabase
+        .from('products')
+        .select('slug')
+        .eq('id', central.product_id)
+        .maybeSingle()
+
+      if (product?.slug === 'whatsapp-service') {
+        return {
+          valid: true,
+          plan: central.plan,
+          userEmail: central.user_email,
+          organizationName: central.organization_name,
+        }
+      }
     }
 
-    // Verify it's for the whatsapp-service product
-    const { data: product } = await supabase
-      .from('products')
-      .select('slug')
-      .eq('id', data.product_id)
-      .single()
+    // Jumpstart system license: WhatsApp device slots on the plan + purchased extras in metadata
+    const { data: oss } = await supabase
+      .from('org_system_subscriptions')
+      .select('plan_code, metadata')
+      .eq('organization_id', orgId)
+      .eq('system_code', 'jumpstart')
+      .eq('status', 'active')
+      .maybeSingle()
 
-    if (product?.slug !== 'whatsapp-service') {
-      logger.info({ orgId, productSlug: product?.slug }, 'Subscription is not for whatsapp-service')
-      return { valid: false }
+    if (oss) {
+      const { data: planRow } = await supabase
+        .from('system_license_plans')
+        .select('features')
+        .eq('system_code', 'jumpstart')
+        .eq('code', oss.plan_code)
+        .maybeSingle()
+
+      const features = (planRow?.features ?? {}) as Record<string, unknown>
+      const metadata = (oss.metadata ?? {}) as Record<string, unknown>
+      const included = Math.max(0, Math.floor(Number(features.whatsapp_devices_included ?? 0)))
+      const extraPurchased = Math.max(0, Math.floor(Number(metadata.whatsapp_extra_devices ?? 0)))
+      const deviceCap = included + extraPurchased
+
+      if (deviceCap >= 1) {
+        logger.info({ orgId, included, extraPurchased, deviceCap }, 'WhatsApp allowed via Jumpstart license')
+        return {
+          valid: true,
+          plan: `jumpstart/${String(oss.plan_code)}`,
+        }
+      }
+
+      logger.info({ orgId, included, extraPurchased }, 'Jumpstart license has no WhatsApp device slots')
     }
 
-    return {
-      valid: true,
-      plan: data.plan,
-      userEmail: data.user_email,
-      organizationName: data.organization_name,
-    }
+    logger.info({ orgId }, 'No WhatsApp entitlement found for org')
+    return { valid: false }
   } catch (err) {
     logger.error({ orgId, err }, 'Error validating org against Supabase')
     // Fail open in case of DB error — don't block the service

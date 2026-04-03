@@ -58,6 +58,15 @@ export function deleteSessionMeta(orgId: string): void {
   }
 }
 
+/** Remove `sessions/<orgId>` (creds, meta, keys) — next pairing needs a new QR scan */
+export function deleteSessionAuthDir(orgId: string): void {
+  const dir = path.join(SESSIONS_DIR, orgId)
+  if (fs.existsSync(dir)) {
+    fs.rmSync(dir, { recursive: true, force: true })
+    logger.debug({ orgId }, 'Session directory removed')
+  }
+}
+
 /** List all org IDs that have session directories (for auto-restore) */
 export function listStoredSessions(): string[] {
   if (!fs.existsSync(SESSIONS_DIR)) return []
@@ -66,4 +75,43 @@ export function listStoredSessions(): string[] {
     const dir = path.join(SESSIONS_DIR, name)
     return fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, 'creds.json'))
   })
+}
+
+/**
+ * Move `sessions/<fromOrgId>` → `sessions/<toOrgId>` (including creds + meta).
+ * Caller must stop the live socket first. Target must not already have creds.
+ */
+export function migrateSessionAuthDir(fromOrgId: string, toOrgId: string): void {
+  if (fromOrgId === toOrgId) {
+    logger.warn({ fromOrgId }, 'migrateSessionAuthDir: same org, skipping')
+    return
+  }
+
+  const fromDir = path.join(SESSIONS_DIR, fromOrgId)
+  const toDir = path.join(SESSIONS_DIR, toOrgId)
+  const fromCreds = path.join(fromDir, 'creds.json')
+  const toCreds = path.join(toDir, 'creds.json')
+
+  if (!fs.existsSync(fromCreds)) {
+    throw new Error(`No WhatsApp credentials at source org ${fromOrgId}`)
+  }
+
+  if (fs.existsSync(toDir)) {
+    if (fs.existsSync(toCreds)) {
+      throw new Error(
+        `Target org ${toOrgId} already has session data — disconnect and remove it first, or pick another org`
+      )
+    }
+    fs.rmSync(toDir, { recursive: true })
+  }
+
+  fs.renameSync(fromDir, toDir)
+
+  const meta = loadSessionMeta(toOrgId)
+  if (meta) {
+    saveSessionMeta({
+      ...meta,
+      orgId: toOrgId,
+    })
+  }
 }

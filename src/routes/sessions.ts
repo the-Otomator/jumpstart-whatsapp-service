@@ -1,9 +1,17 @@
 import { Router, Request, Response } from 'express'
-import { startSession, getQR, getStatus, stopSession, listActiveSessions } from '../sessionManager'
+import {
+  startSession,
+  migrateSession,
+  getQR,
+  getStatus,
+  stopSession,
+  listActiveSessions,
+} from '../sessionManager'
 import {
   validateBody,
   validateParams,
   startSessionSchema,
+  migrateSessionSchema,
   orgIdParamsSchema,
 } from '../middleware/validate'
 import { getWebhookFailures, clearWebhookFailures } from '../lib/webhookDispatcher'
@@ -46,6 +54,60 @@ router.post(
       res.status(500).json({
         error: (err as Error).message,
         code: 'SESSION_START_FAILED',
+      })
+    }
+  }
+)
+
+// ── Purge instance (stop socket + delete creds + meta) — next connect needs QR ──
+router.post(
+  '/:orgId/purge',
+  validateParams(orgIdParamsSchema),
+  (req: Request, res: Response) => {
+    const { orgId } = req.params
+    stopSession(orgId, { purgeAuthDir: true })
+    orgLogger(orgId).info('Session instance purged via API')
+    res.json({ success: true, orgId, purged: true })
+  }
+)
+
+// ── Migrate session (auth folder) to another org — keeps pairing, no new QR ──
+router.post(
+  '/:orgId/migrate',
+  validateParams(orgIdParamsSchema),
+  validateBody(migrateSessionSchema),
+  async (req: Request, res: Response) => {
+    const fromOrgId = req.params.orgId
+    const { targetOrgId, webhookUrl } = req.body as {
+      targetOrgId: string
+      webhookUrl?: string
+    }
+
+    if (fromOrgId === targetOrgId) {
+      res.status(400).json({
+        error: 'Source and target organization must differ',
+        code: 'SAME_ORG',
+      })
+      return
+    }
+
+    const orgCheck = await validateOrg(targetOrgId)
+    if (!orgCheck.valid) {
+      res.status(403).json({
+        error: 'No active subscription for target organization',
+        code: 'ORG_NOT_AUTHORIZED',
+      })
+      return
+    }
+
+    try {
+      await migrateSession(fromOrgId, targetOrgId, webhookUrl)
+      res.json({ success: true, fromOrgId, targetOrgId })
+    } catch (err) {
+      orgLogger(fromOrgId).error({ err, targetOrgId }, 'Session migrate failed')
+      res.status(500).json({
+        error: (err as Error).message,
+        code: 'SESSION_MIGRATE_FAILED',
       })
     }
   }
@@ -94,9 +156,13 @@ router.delete(
   validateParams(orgIdParamsSchema),
   (req: Request, res: Response) => {
     const { orgId } = req.params
-    stopSession(orgId)
-    orgLogger(orgId).info('Session stopped via API')
-    res.json({ success: true, orgId })
+    const purge =
+      req.query.purge === 'true' ||
+      req.query.purge === '1' ||
+      req.query.wipe === 'true'
+    stopSession(orgId, { purgeAuthDir: purge })
+    orgLogger(orgId).info({ purge }, 'Session stop via API')
+    res.json({ success: true, orgId, purged: purge })
   }
 )
 

@@ -11,13 +11,15 @@ import QRCode from 'qrcode'
 import path from 'path'
 import { Session } from './types'
 import { logger, orgLogger } from './lib/logger'
-import { postWebhook } from './lib/webhookDispatcher'
+import { postWebhook, rekeyWebhookFailures } from './lib/webhookDispatcher'
 import {
   saveSessionMeta,
   loadSessionMeta,
   updateSessionMeta,
   deleteSessionMeta,
+  deleteSessionAuthDir,
   listStoredSessions,
+  migrateSessionAuthDir,
 } from './lib/sessionStore'
 import pino from 'pino'
 
@@ -26,10 +28,14 @@ const baileysLogger = pino({ level: 'silent' })
 export const sessions = new Map<string, Session>()
 export const sockets: Map<string, any> = new Map()
 
+/** Stops auto-reconnect when the session was ended deliberately (e.g. admin DELETE / Edit). */
+const intentionallyStoppedOrgIds = new Set<string>()
+
 // ── Start a session ────────────────────────────────────────────
 
 export async function startSession(orgId: string, webhookUrl?: string): Promise<void> {
   const log = orgLogger(orgId)
+  intentionallyStoppedOrgIds.delete(orgId)
 
   // Clean up any existing session first
   if (sockets.has(orgId)) {
@@ -104,6 +110,13 @@ export async function startSession(orgId: string, webhookUrl?: string): Promise<
 
       if (webhookUrl) {
         await postWebhook(webhookUrl, { event: 'disconnected', orgId, reason })
+      }
+
+      if (intentionallyStoppedOrgIds.has(orgId)) {
+        intentionallyStoppedOrgIds.delete(orgId)
+        log.info('Intentional stop — not scheduling reconnect')
+        sockets.delete(orgId)
+        return
       }
 
       if (statusCode !== DisconnectReason.loggedOut) {
@@ -221,13 +234,59 @@ export function getQR(orgId: string): string | undefined {
   return s?.status === 'qr' ? s.qr : undefined
 }
 
-export function stopSession(orgId: string): void {
+export function stopSession(
+  orgId: string,
+  options?: { keepAuthFiles?: boolean; purgeAuthDir?: boolean }
+): void {
+  const keepAuth = options?.keepAuthFiles === true
+  const purgeAuth = options?.purgeAuthDir === true
   const log = orgLogger(orgId)
+  intentionallyStoppedOrgIds.add(orgId)
   sockets.get(orgId)?.end(undefined)
   sockets.delete(orgId)
   sessions.delete(orgId)
-  deleteSessionMeta(orgId)
-  log.info('Session stopped and metadata removed')
+  if (purgeAuth) {
+    deleteSessionAuthDir(orgId)
+    log.info('Session stopped — all pairing data removed from disk')
+  } else if (!keepAuth) {
+    deleteSessionMeta(orgId)
+    log.info('Session stopped and metadata removed')
+  } else {
+    log.info('Session stopped (auth files kept for migrate)')
+  }
+}
+
+/**
+ * Move paired WhatsApp auth from one org folder to another and reconnect under `toOrgId`
+ * (no new QR if creds are valid).
+ */
+export async function migrateSession(
+  fromOrgId: string,
+  toOrgId: string,
+  webhookUrl?: string
+): Promise<void> {
+  if (fromOrgId === toOrgId) {
+    await startSession(fromOrgId, webhookUrl)
+    return
+  }
+
+  const log = orgLogger(fromOrgId)
+  log.info({ toOrgId }, 'Migrating WhatsApp session to new organization')
+
+  stopSession(fromOrgId, { keepAuthFiles: true })
+
+  try {
+    migrateSessionAuthDir(fromOrgId, toOrgId)
+  } catch (err) {
+    logger.error({ fromOrgId, toOrgId, err }, 'migrateSessionAuthDir failed')
+    throw err
+  }
+
+  rekeyWebhookFailures(fromOrgId, toOrgId)
+
+  await startSession(toOrgId, webhookUrl)
+
+  orgLogger(toOrgId).info({ fromOrgId }, 'Session migrate complete — connected under new org')
 }
 
 export function listActiveSessions(): Session[] {

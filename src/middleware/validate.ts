@@ -19,6 +19,11 @@ export const startSessionSchema = z.object({
   autoRestore: z.boolean().optional().default(true),
 })
 
+export const migrateSessionSchema = z.object({
+  targetOrgId: orgIdSchema,
+  webhookUrl: webhookUrlSchema,
+})
+
 export const sendMessageSchema = z.object({
   orgId: orgIdSchema,
   to: phoneSchema,

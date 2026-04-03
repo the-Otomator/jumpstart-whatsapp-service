@@ -89,3 +89,11 @@ export function clearWebhookFailures(orgId: string): number {
   failureLog.push(...keep)
   return before - failureLog.length
 }
+
+/** Point stored failure rows at the new org after session migrate */
+export function rekeyWebhookFailures(fromOrgId: string, toOrgId: string): void {
+  if (fromOrgId === toOrgId) return
+  for (const f of failureLog) {
+    if (f.orgId === fromOrgId) f.orgId = toOrgId
+  }
+}
