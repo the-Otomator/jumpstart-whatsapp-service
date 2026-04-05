@@ -1,96 +1,23 @@
 import { Router, Request, Response } from 'express'
-import { sessions, sockets } from '../sessionManager'
 import { SendMessageRequest } from '../types'
 import { validateBody, sendMessageSchema, sendBulkSchema } from '../middleware/validate'
 import { orgLogger } from '../lib/logger'
-import { AnyMessageContent } from '@whiskeysockets/baileys'
+import { getProviderForOrg } from '../providers'
 
 const router = Router()
 
-function formatJid(phone: string): string {
-  const clean = phone.replace(/[^0-9]/g, '')
-  return clean.endsWith('@s.whatsapp.net') ? clean : `${clean}@s.whatsapp.net`
-}
-
-/** Build the Baileys message content from our SendMessageRequest */
-async function buildMessageContent(req: SendMessageRequest): Promise<AnyMessageContent> {
-  switch (req.type) {
-    case 'text':
-      return { text: req.message ?? '' }
-
-    case 'image': {
-      const media = req.mediaUrl
-        ? { url: req.mediaUrl }
-        : { url: `data:${req.mimetype ?? 'image/jpeg'};base64,${req.mediaBase64}` }
-      return { image: media, caption: req.message }
-    }
-
-    case 'video': {
-      const media = req.mediaUrl
-        ? { url: req.mediaUrl }
-        : { url: `data:${req.mimetype ?? 'video/mp4'};base64,${req.mediaBase64}` }
-      return { video: media, caption: req.message }
-    }
-
-    case 'audio': {
-      const media = req.mediaUrl
-        ? { url: req.mediaUrl }
-        : { url: `data:${req.mimetype ?? 'audio/mpeg'};base64,${req.mediaBase64}` }
-      return { audio: media, mimetype: req.mimetype ?? 'audio/mpeg' }
-    }
-
-    case 'document': {
-      const media = req.mediaUrl
-        ? { url: req.mediaUrl }
-        : { url: `data:${req.mimetype ?? 'application/octet-stream'};base64,${req.mediaBase64}` }
-      return {
-        document: media,
-        mimetype: req.mimetype ?? 'application/octet-stream',
-        fileName: req.filename ?? 'document',
-        caption: req.message,
-      }
-    }
-
-    case 'location':
-      return {
-        location: {
-          degreesLatitude: req.latitude!,
-          degreesLongitude: req.longitude!,
-        },
-      }
-
-    case 'contact': {
-      const vcard = [
-        'BEGIN:VCARD',
-        'VERSION:3.0',
-        `FN:${req.contactName}`,
-        `TEL;type=CELL;type=VOICE;waid=${req.contactPhone}:+${req.contactPhone}`,
-        'END:VCARD',
-      ].join('\n')
-      return {
-        contacts: {
-          displayName: req.contactName!,
-          contacts: [{ vcard }],
-        },
-      }
-    }
-
-    default:
-      return { text: req.message ?? '' }
-  }
-}
-
 /** Shared by `POST /api/messages/send` and `POST /api/sessions/:orgId/send`. */
 export async function sendWhatsAppMessage(req: SendMessageRequest): Promise<string> {
-  const session = sessions.get(req.orgId)
-  if (!session || session.status !== 'connected') {
+  const provider = getProviderForOrg(req.orgId)
+  if (!provider) throw new Error(`Session ${req.orgId} not connected`)
+
+  const status = provider.getStatus(req.orgId)
+  if (!status || status.status !== 'connected') {
     throw new Error(`Session ${req.orgId} not connected`)
   }
-  const sock = sockets.get(req.orgId)!
-  const jid = formatJid(req.to)
-  const content = await buildMessageContent(req)
-  const result = await sock.sendMessage(jid, content)
-  return result?.key?.id ?? ''
+
+  const result = await provider.sendMessage(req)
+  return result.messageId
 }
 
 // ── Send single message ─────────────────────────────────────────

@@ -8,7 +8,7 @@ import { authMiddleware } from './auth'
 import sessionRoutes from './routes/sessions'
 import messageRoutes from './routes/messages'
 import connectRoutes from './routes/connect'
-import { sessions, restoreSessions } from './sessionManager'
+import { listActiveSessions, restoreSessions } from './sessionManager'
 import { logger } from './lib/logger'
 import { requestIdMiddleware } from './middleware/requestId'
 import { setupGracefulShutdown } from './lib/shutdown'
@@ -84,11 +84,11 @@ const apiLimiter = rateLimit({
 
 // ── Health check (no auth) ───────────────────────────────────────
 app.get('/health', (_req, res) => {
-  const sessionList = Array.from(sessions.values())
+  const sessionList = listActiveSessions()
   res.json({
     status: 'ok',
     version: process.env.npm_package_version ?? '1.0.0',
-    sessions: sessions.size,
+    sessions: sessionList.length,
     connected: sessionList.filter((s) => s.status === 'connected').length,
     uptime: Math.floor(process.uptime()),
     memoryMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),

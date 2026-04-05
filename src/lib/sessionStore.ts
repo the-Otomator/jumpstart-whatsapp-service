@@ -4,6 +4,8 @@ import { logger } from './logger'
 
 export interface SessionMeta {
   orgId: string
+  /** Defaults to Baileys when missing (existing installs). */
+  provider?: 'baileys' | 'meta-cloud'
   webhookUrl?: string
   createdAt: string
   phoneNumber?: string

@@ -1,6 +1,6 @@
 import { Server } from 'http'
 import { logger } from './logger'
-import { sockets, sessions } from '../sessionManager'
+import { listActiveSessions, stopSession } from '../sessionManager'
 
 let isShuttingDown = false
 
@@ -16,24 +16,18 @@ export function setupGracefulShutdown(server: Server): void {
       logger.info('HTTP server closed')
     })
 
-    // 2. Close all WhatsApp sockets cleanly
-    const orgIds = Array.from(sockets.keys())
-    logger.info({ count: orgIds.length }, 'Closing WhatsApp sessions')
+    // 2. Close all WhatsApp sessions (keep auth + meta on disk for next start)
+    const active = listActiveSessions()
+    logger.info({ count: active.length }, 'Closing WhatsApp sessions')
 
-    for (const orgId of orgIds) {
+    for (const { orgId } of active) {
       try {
-        const sock = sockets.get(orgId)
-        if (sock) {
-          sock.end(undefined)
-          logger.debug({ orgId }, 'Session socket closed')
-        }
+        stopSession(orgId, { keepAuthFiles: true })
+        logger.debug({ orgId }, 'Session socket closed')
       } catch (err) {
-        logger.warn({ orgId, err }, 'Error closing session socket')
+        logger.warn({ orgId, err }, 'Error closing session')
       }
     }
-
-    sockets.clear()
-    sessions.clear()
 
     // 3. Give a moment for cleanup, then exit
     setTimeout(() => {
