@@ -13,10 +13,12 @@ import {
   startSessionSchema,
   migrateSessionSchema,
   orgIdParamsSchema,
+  sessionPathSendBodySchema,
 } from '../middleware/validate'
 import { getWebhookFailures, clearWebhookFailures } from '../lib/webhookDispatcher'
 import { orgLogger } from '../lib/logger'
 import { validateOrg } from '../lib/supabase'
+import { sendWhatsAppMessage } from './messages'
 
 const router = Router()
 
@@ -55,6 +57,34 @@ router.post(
         error: (err as Error).message,
         code: 'SESSION_START_FAILED',
       })
+    }
+  }
+)
+
+// ── Send text (alias for `POST /api/messages/send` with orgId in path) ──
+router.post(
+  '/:orgId/send',
+  validateParams(orgIdParamsSchema),
+  validateBody(sessionPathSendBodySchema),
+  async (req: Request, res: Response) => {
+    const { orgId } = req.params
+    const { to, message } = req.body as { to: string; message: string }
+    const log = orgLogger(orgId)
+    try {
+      const messageId = await sendWhatsAppMessage({
+        orgId,
+        to,
+        type: 'text',
+        message,
+      })
+      log.info({ to, messageId }, 'Message sent (session path)')
+      res.json({ success: true, messageId })
+    } catch (err) {
+      const msg = (err as Error).message
+      const status = msg.includes('not connected') ? 404 : 500
+      const code = msg.includes('not connected') ? 'SESSION_NOT_CONNECTED' : 'SEND_FAILED'
+      log.error({ to, err: msg }, 'Failed to send message (session path)')
+      res.status(status).json({ error: msg, code })
     }
   }
 )

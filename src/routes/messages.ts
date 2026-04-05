@@ -80,7 +80,8 @@ async function buildMessageContent(req: SendMessageRequest): Promise<AnyMessageC
   }
 }
 
-async function sendOne(req: SendMessageRequest): Promise<string> {
+/** Shared by `POST /api/messages/send` and `POST /api/sessions/:orgId/send`. */
+export async function sendWhatsAppMessage(req: SendMessageRequest): Promise<string> {
   const session = sessions.get(req.orgId)
   if (!session || session.status !== 'connected') {
     throw new Error(`Session ${req.orgId} not connected`)
@@ -98,7 +99,7 @@ router.post('/send', validateBody(sendMessageSchema), async (req: Request, res: 
   const log = orgLogger(body.orgId)
 
   try {
-    const messageId = await sendOne(body)
+    const messageId = await sendWhatsAppMessage(body)
     log.info({ to: body.to, type: body.type, messageId }, 'Message sent')
     res.json({ success: true, messageId })
   } catch (err) {
@@ -118,7 +119,7 @@ router.post('/send-bulk', validateBody(sendBulkSchema), async (req: Request, res
   for (const msg of messages) {
     const log = orgLogger(msg.orgId)
     try {
-      const messageId = await sendOne(msg)
+      const messageId = await sendWhatsAppMessage(msg)
       results.push({ to: msg.to, success: true, messageId })
       log.debug({ to: msg.to, messageId }, 'Bulk message sent')
     } catch (err) {

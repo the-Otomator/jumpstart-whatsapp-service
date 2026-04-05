@@ -6,6 +6,25 @@ import { validateOrg } from '../lib/supabase'
 const router = Router()
 
 /**
+ * GET /connect/:orgId/status (JSON)
+ * Polled by the connect page to get live status + QR.
+ * Registered before `/:orgId` so paths like `/uuid/status` never match a greedy `:orgId`.
+ */
+router.get('/:orgId/status', (req: Request, res: Response) => {
+  const { orgId } = req.params
+  const session = getStatus(orgId)
+  if (!session) {
+    res.json({ status: 'not_found' })
+    return
+  }
+  res.json({
+    status: session.status,
+    phoneNumber: session.phoneNumber,
+    qr: session.status === 'qr' ? session.qr : undefined,
+  })
+})
+
+/**
  * GET /connect/:orgId
  * Self-contained QR onboarding page.
  * No auth — this is a one-time setup link shared with the client.
@@ -33,24 +52,6 @@ router.get('/:orgId', async (req: Request, res: Response) => {
   }
 
   res.send(renderConnectPage(orgId))
-})
-
-/**
- * GET /connect/:orgId/status (JSON)
- * Polled by the connect page to get live status + QR.
- */
-router.get('/:orgId/status', (req: Request, res: Response) => {
-  const { orgId } = req.params
-  const session = getStatus(orgId)
-  if (!session) {
-    res.json({ status: 'not_found' })
-    return
-  }
-  res.json({
-    status: session.status,
-    phoneNumber: session.phoneNumber,
-    qr: session.status === 'qr' ? session.qr : undefined,
-  })
 })
 
 function renderConnectPage(orgId: string): string {

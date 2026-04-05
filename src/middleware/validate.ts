@@ -52,6 +52,12 @@ export const sendMessageSchema = z.object({
 
 export const sendBulkSchema = z.array(sendMessageSchema).min(1).max(100)
 
+/** Body for `POST /api/sessions/:orgId/send` (orgId from path). */
+export const sessionPathSendBodySchema = z.object({
+  to: phoneSchema,
+  message: z.string().min(1).max(4096, 'Message too long (max 4096 chars)'),
+})
+
 export const checkContactsSchema = z.object({
   orgId: orgIdSchema,
   phones: z.array(phoneSchema).min(1).max(100),
