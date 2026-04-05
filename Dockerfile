@@ -8,6 +8,7 @@ RUN npm run build
 
 # ── Stage 2: Production image ─────────────────────
 FROM node:20-alpine
+ENV NODE_ENV=production
 RUN apk add --no-cache wget
 WORKDIR /app
 COPY --from=builder /app/dist ./dist
