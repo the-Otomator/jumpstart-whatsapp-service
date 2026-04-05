@@ -15,7 +15,7 @@ export interface WhatsAppProvider {
   readonly type: ProviderType
 
   /** Start a session (connect to WhatsApp). */
-  start(orgId: string, webhookUrl?: string): Promise<void>
+  start(orgId: string, webhookUrl?: string, partnerName?: string): Promise<void>
 
   /** Stop a session. */
   stop(orgId: string, options?: { keepAuthFiles?: boolean; purgeAuthDir?: boolean }): void

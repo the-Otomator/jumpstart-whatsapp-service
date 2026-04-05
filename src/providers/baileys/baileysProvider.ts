@@ -33,7 +33,7 @@ export class BaileysProvider implements WhatsAppProvider {
   private sockets = new Map<string, ReturnType<typeof makeWASocket>>()
   private intentionallyStoppedOrgIds = new Set<string>()
 
-  async start(orgId: string, webhookUrl?: string): Promise<void> {
+  async start(orgId: string, webhookUrl?: string, partnerName?: string): Promise<void> {
     const log = orgLogger(orgId)
     this.intentionallyStoppedOrgIds.delete(orgId)
 
@@ -43,11 +43,15 @@ export class BaileysProvider implements WhatsAppProvider {
       this.sockets.delete(orgId)
     }
 
+    const existingMeta = loadSessionMeta(orgId)
+    const resolvedPartnerName = partnerName ?? existingMeta?.partnerName
+
     const session: Session = {
       orgId,
       provider: 'baileys',
       status: 'connecting',
       webhookUrl,
+      ...(resolvedPartnerName !== undefined && { partnerName: resolvedPartnerName }),
     }
     this.sessions.set(orgId, session)
 
@@ -55,8 +59,11 @@ export class BaileysProvider implements WhatsAppProvider {
       orgId,
       provider: 'baileys',
       webhookUrl,
-      createdAt: new Date().toISOString(),
-      autoRestore: true,
+      createdAt: existingMeta?.createdAt ?? new Date().toISOString(),
+      autoRestore: existingMeta?.autoRestore ?? true,
+      phoneNumber: existingMeta?.phoneNumber,
+      lastConnected: existingMeta?.lastConnected,
+      ...(resolvedPartnerName !== undefined && { partnerName: resolvedPartnerName }),
     })
 
     const authDir = path.join(process.cwd(), 'sessions', orgId)
@@ -124,7 +131,7 @@ export class BaileysProvider implements WhatsAppProvider {
 
         if (statusCode !== DisconnectReason.loggedOut) {
           log.info('Reconnecting in 5 seconds...')
-          setTimeout(() => this.start(orgId, webhookUrl), 5000)
+          setTimeout(() => this.start(orgId, webhookUrl, session.partnerName), 5000)
         } else {
           log.info('Logged out — not reconnecting')
           this.sockets.delete(orgId)
@@ -257,7 +264,7 @@ export class BaileysProvider implements WhatsAppProvider {
       if (meta && meta.autoRestore !== false) {
         if (meta.provider === 'meta-cloud') continue
         try {
-          await this.start(orgId, meta.webhookUrl)
+          await this.start(orgId, meta.webhookUrl, meta.partnerName)
           logger.info({ orgId }, 'Session restored')
         } catch (err) {
           logger.error({ orgId, err }, 'Failed to restore session')
@@ -268,7 +275,8 @@ export class BaileysProvider implements WhatsAppProvider {
 
   async migrateSession(fromOrgId: string, toOrgId: string, webhookUrl?: string): Promise<void> {
     if (fromOrgId === toOrgId) {
-      await this.start(fromOrgId, webhookUrl)
+      const meta = loadSessionMeta(fromOrgId)
+      await this.start(fromOrgId, webhookUrl, meta?.partnerName)
       return
     }
 
@@ -276,6 +284,8 @@ export class BaileysProvider implements WhatsAppProvider {
     log.info({ toOrgId }, 'Migrating WhatsApp session to new organization')
 
     this.stop(fromOrgId, { keepAuthFiles: true })
+
+    const oldMeta = loadSessionMeta(fromOrgId)
 
     try {
       migrateSessionAuthDir(fromOrgId, toOrgId)
@@ -286,7 +296,7 @@ export class BaileysProvider implements WhatsAppProvider {
 
     rekeyWebhookFailures(fromOrgId, toOrgId)
 
-    await this.start(toOrgId, webhookUrl)
+    await this.start(toOrgId, webhookUrl, oldMeta?.partnerName)
 
     orgLogger(toOrgId).info({ fromOrgId }, 'Session migrate complete — connected under new org')
   }

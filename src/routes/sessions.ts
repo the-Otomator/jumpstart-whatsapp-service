@@ -92,7 +92,16 @@ router.post(
     }
 
     try {
-      await startSession(orgId, webhookUrl)
+      let partnerName: string | undefined
+      if (supabase) {
+        const { data } = await supabase
+          .from('partner_org_slots')
+          .select('partner_name')
+          .eq('org_id', orgId)
+          .single()
+        partnerName = data?.partner_name ?? undefined
+      }
+      await startSession(orgId, webhookUrl, partnerName)
       log.info('Session start requested')
       res.json({ success: true, orgId, status: 'connecting' })
     } catch (err) {

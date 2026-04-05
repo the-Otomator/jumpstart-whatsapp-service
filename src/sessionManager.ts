@@ -1,18 +1,13 @@
 import type { Session } from './types'
-import {
-  getProvider,
-  getProviderForOrg,
-  getAllProviders,
-  type ProviderType,
-} from './providers'
+import { getProvider, getProviderForOrg, getAllProviders } from './providers'
 
 export async function startSession(
   orgId: string,
   webhookUrl?: string,
-  providerType: ProviderType = 'baileys'
+  partnerName?: string
 ): Promise<void> {
-  const provider = getProvider(providerType)
-  await provider.start(orgId, webhookUrl)
+  const provider = getProvider('baileys')
+  await provider.start(orgId, webhookUrl, partnerName)
 }
 
 export function getStatus(orgId: string): Session | undefined {

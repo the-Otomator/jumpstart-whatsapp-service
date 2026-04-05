@@ -7,6 +7,7 @@ export interface Session {
   qr?: string
   phoneNumber?: string
   webhookUrl?: string
+  partnerName?: string
 }
 
 export type MessageType =

@@ -7,6 +7,7 @@ export interface SessionMeta {
   /** Defaults to Baileys when missing (existing installs). */
   provider?: 'baileys' | 'meta-cloud'
   webhookUrl?: string
+  partnerName?: string
   createdAt: string
   phoneNumber?: string
   lastConnected?: string
