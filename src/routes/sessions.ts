@@ -17,7 +17,7 @@ import {
 } from '../middleware/validate'
 import { getWebhookFailures, clearWebhookFailures } from '../lib/webhookDispatcher'
 import { orgLogger } from '../lib/logger'
-import { validateOrg } from '../lib/supabase'
+import { validateOrg, supabase } from '../lib/supabase'
 import { sendWhatsAppMessage } from './messages'
 
 const router = Router()
@@ -27,6 +27,50 @@ router.get('/', (_req: Request, res: Response) => {
   const all = listActiveSessions().map(({ qr, ...rest }) => rest)
   res.json({ sessions: all, count: all.length })
 })
+
+// ── Register an org as a partner slot ─────────────────────────
+router.post(
+  '/:orgId/register-partner',
+  validateParams(orgIdParamsSchema),
+  async (req: Request, res: Response) => {
+    const PARTNER_KEY = process.env.PARTNER_REGISTRATION_KEY
+    const incomingKey = req.headers['x-partner-key'] as string | undefined
+    if (!PARTNER_KEY || incomingKey !== PARTNER_KEY) {
+      res.status(403).json({ error: 'Invalid partner key' })
+      return
+    }
+    const { partnerName } = req.body as { partnerName?: string }
+    if (!partnerName) {
+      res.status(400).json({ error: 'partnerName is required' })
+      return
+    }
+
+    // Enforce namespace: workmatch → wm-, others → {name}-
+    const PREFIXES: Record<string, string> = { workmatch: 'wm-' }
+    const prefix = PREFIXES[partnerName] ?? `${partnerName}-`
+    const rawOrgId = req.params.orgId
+    const safeOrgId = rawOrgId.startsWith(prefix)
+      ? rawOrgId
+      : `${prefix}${rawOrgId}`
+
+    if (!supabase) {
+      res.json({ success: true, orgId: safeOrgId, note: 'supabase not configured' })
+      return
+    }
+    try {
+      const { error } = await supabase
+        .from('partner_org_slots')
+        .upsert(
+          { org_id: safeOrgId, partner_name: partnerName, status: 'active' },
+          { onConflict: 'org_id' }
+        )
+      if (error) throw error
+      res.json({ success: true, orgId: safeOrgId, partner: partnerName })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  }
+)
 
 // ── Start a session ─────────────────────────────────────────────
 router.post(

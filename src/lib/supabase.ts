@@ -90,6 +90,19 @@ export async function validateOrg(orgId: string): Promise<{
       logger.info({ orgId, included, extraPurchased }, 'Jumpstart license has no WhatsApp device slots')
     }
 
+    // Check 4: Partner org slot (WorkMatch and future partners)
+    const { data: slot } = await supabase
+      .from('partner_org_slots')
+      .select('org_id, partner_name, status')
+      .eq('org_id', orgId)
+      .eq('status', 'active')
+      .maybeSingle()
+
+    if (slot) {
+      logger.info({ orgId, partner: slot.partner_name }, 'WhatsApp allowed via partner license')
+      return { valid: true, plan: `partner/${slot.partner_name}` }
+    }
+
     logger.info({ orgId }, 'No WhatsApp entitlement found for org')
     return { valid: false }
   } catch (err) {
