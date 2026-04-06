@@ -2,12 +2,27 @@
 
 Multi-tenant WhatsApp microservice built on Baileys (unofficial WhatsApp Web API).
 
+## Production server
+
+| | |
+|---|---|
+| **Host** | `wa-prod-1` — Hetzner CCX13, Nuremberg |
+| **IP** | `178.104.118.178` |
+| **Domain** | `wa.otomator.pro` (Cloudflare proxied — orange cloud ON) |
+| **SSL** | Cloudflare "Full" mode + self-signed cert on origin (`/etc/nginx/ssl/`) |
+| **App dir** | `/opt/whatsapp-service` |
+| **Logs** | `cd /opt/whatsapp-service && docker compose logs -f` |
+| **Health** | `https://wa.otomator.pro/health` |
+
+> Previous server (decommissioned): Hostinger 147.93.127.180
+
 ## Quick reference
 
 - **Build**: `npm run build` (TypeScript → `dist/`)
 - **Dev**: `npm run dev`
 - **Start**: `npm start`
 - **Docker**: `docker compose up --build`
+- **Deploy to prod**: `ssh root@178.104.118.178 "cd /opt/whatsapp-service && git pull && docker compose up -d --build"`
 
 ## Architecture
 

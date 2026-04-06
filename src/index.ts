@@ -4,6 +4,9 @@ import cors from 'cors'
 import helmet from 'helmet'
 import { rateLimit } from 'express-rate-limit'
 import pinoHttp from 'pino-http'
+import * as os from 'os'
+import { exec } from 'child_process'
+import { promisify } from 'util'
 import { authMiddleware } from './auth'
 import sessionRoutes from './routes/sessions'
 import messageRoutes from './routes/messages'
@@ -13,6 +16,34 @@ import { listActiveSessions, restoreSessions } from './sessionManager'
 import { logger } from './lib/logger'
 import { requestIdMiddleware } from './middleware/requestId'
 import { setupGracefulShutdown } from './lib/shutdown'
+
+const execAsync = promisify(exec)
+
+// ── In-memory error log (last 100 errors, used by /health) ────────
+interface ErrorEntry { time: number; msg: string }
+const recentErrorLog: ErrorEntry[] = []
+export function trackError(msg: string): void {
+  recentErrorLog.push({ time: Date.now(), msg })
+  if (recentErrorLog.length > 100) recentErrorLog.shift()
+}
+
+// ── Disk stats (Linux df) ─────────────────────────────────────────
+interface DiskStats { totalGB: number; usedGB: number; freeGB: number; percentUsed: number }
+async function getDiskStats(): Promise<DiskStats | null> {
+  try {
+    const { stdout } = await execAsync("df -B1 / | tail -1 | awk '{print $2, $3, $4}'")
+    const [total, used, free] = stdout.trim().split(' ').map(Number)
+    if (!total) return null
+    return {
+      totalGB: Math.round(total / 1e9 * 10) / 10,
+      usedGB: Math.round(used / 1e9 * 10) / 10,
+      freeGB: Math.round(free / 1e9 * 10) / 10,
+      percentUsed: Math.round((used / total) * 100),
+    }
+  } catch {
+    return null
+  }
+}
 
 // ── Validate required environment ────────────────────────────────
 if (!process.env.API_SECRET) {
@@ -84,15 +115,32 @@ const apiLimiter = rateLimit({
 })
 
 // ── Health check (no auth) ───────────────────────────────────────
-app.get('/health', (_req, res) => {
+app.get('/health', async (_req, res) => {
   const sessionList = listActiveSessions()
+  const loadAvg = os.loadavg()
+  const totalMemoryMB = Math.round(os.totalmem() / 1024 / 1024)
+  const freeMemoryMB = Math.round(os.freemem() / 1024 / 1024)
+  const disk = await getDiskStats()
+  const hourAgo = Date.now() - 60 * 60 * 1_000
+  const recentErrors = recentErrorLog.filter((e) => e.time > hourAgo).length
+
   res.json({
     status: 'ok',
     version: process.env.npm_package_version ?? '1.0.0',
+    hostname: os.hostname(),
     sessions: sessionList.length,
     connected: sessionList.filter((s) => s.status === 'connected').length,
     uptime: Math.floor(process.uptime()),
     memoryMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    totalMemoryMB,
+    freeMemoryMB,
+    loadAvg: {
+      '1min': Math.round(loadAvg[0] * 100) / 100,
+      '5min': Math.round(loadAvg[1] * 100) / 100,
+      '15min': Math.round(loadAvg[2] * 100) / 100,
+    },
+    disk,
+    recentErrors,
   })
 })
 

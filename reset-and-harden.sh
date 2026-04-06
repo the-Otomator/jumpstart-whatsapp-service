@@ -1,9 +1,9 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────
 # reset-and-harden.sh
-# Clean reset + hardening for wa.otomator.pro (147.93.127.180)
+# Clean reset + hardening for wa.otomator.pro (178.104.118.178 — wa-prod-1 Hetzner)
 #
-# Usage:  ssh root@147.93.127.180
+# Usage:  ssh root@178.104.118.178
 #         bash /opt/whatsapp-service/reset-and-harden.sh
 # ─────────────────────────────────────────────────────────────
 set -e
