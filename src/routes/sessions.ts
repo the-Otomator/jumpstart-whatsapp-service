@@ -79,7 +79,7 @@ router.post(
   validateBody(startSessionSchema),
   async (req: Request, res: Response) => {
     const { orgId } = req.params
-    const { webhookUrl } = req.body
+    const { webhookUrl, provider: providerType, metaAccessToken, metaPhoneNumberId, metaWabaId } = req.body
     const log = orgLogger(orgId)
 
     const orgCheck = await validateOrg(orgId)
@@ -92,9 +92,14 @@ router.post(
     }
 
     try {
-      await startSession(orgId, webhookUrl)
-      log.info('Session start requested')
-      res.json({ success: true, orgId, status: 'connecting' })
+      await startSession(orgId, webhookUrl, providerType ?? 'baileys', {
+        accessToken: metaAccessToken,
+        phoneNumberId: metaPhoneNumberId,
+        wabaId: metaWabaId,
+      })
+      log.info({ provider: providerType ?? 'baileys' }, 'Session start requested')
+      const initialStatus = providerType === 'meta-cloud' ? 'connected' : 'connecting'
+      res.json({ success: true, orgId, status: initialStatus, provider: providerType ?? 'baileys' })
     } catch (err) {
       log.error({ err }, 'Failed to start session')
       res.status(500).json({

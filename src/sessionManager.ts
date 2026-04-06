@@ -9,10 +9,16 @@ import {
 export async function startSession(
   orgId: string,
   webhookUrl?: string,
-  providerType: ProviderType = 'baileys'
+  providerType: ProviderType = 'baileys',
+  metaConfig?: { accessToken?: string; phoneNumberId?: string; wabaId?: string }
 ): Promise<void> {
   const provider = getProvider(providerType)
-  await provider.start(orgId, webhookUrl)
+  // For meta-cloud, the start() method accepts config as 3rd argument
+  if (providerType === 'meta-cloud') {
+    await (provider as any).start(orgId, webhookUrl, metaConfig)
+  } else {
+    await provider.start(orgId, webhookUrl)
+  }
 }
 
 export function getStatus(orgId: string): Session | undefined {

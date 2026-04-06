@@ -17,6 +17,11 @@ export const webhookUrlSchema = z.string().url('Must be a valid URL').startsWith
 export const startSessionSchema = z.object({
   webhookUrl: webhookUrlSchema,
   autoRestore: z.boolean().optional().default(true),
+  provider: z.enum(['baileys', 'meta-cloud']).optional().default('baileys'),
+  // Meta Cloud optional overrides (if not using env defaults)
+  metaAccessToken: z.string().optional(),
+  metaPhoneNumberId: z.string().optional(),
+  metaWabaId: z.string().optional(),
 })
 
 export const migrateSessionSchema = z.object({
@@ -27,7 +32,7 @@ export const migrateSessionSchema = z.object({
 export const sendMessageSchema = z.object({
   orgId: orgIdSchema,
   to: phoneSchema,
-  type: z.enum(['text', 'image', 'video', 'audio', 'document', 'location', 'contact']).optional().default('text'),
+  type: z.enum(['text', 'image', 'video', 'audio', 'document', 'location', 'contact', 'template']).optional().default('text'),
   message: z.string().max(4096, 'Message too long (max 4096 chars)').optional(),
   mediaUrl: z.string().url('Must be a valid URL').optional(),
   mediaBase64: z.string().optional(),
@@ -37,14 +42,28 @@ export const sendMessageSchema = z.object({
   longitude: z.number().min(-180).max(180).optional(),
   contactName: z.string().max(256).optional(),
   contactPhone: phoneSchema.optional(),
+  // Template (Meta Cloud only)
+  template: z.object({
+    name: z.string().min(1),
+    language: z.string().min(2),
+    components: z.array(z.object({
+      type: z.enum(['header', 'body', 'button']),
+      parameters: z.array(z.object({
+        type: z.enum(['text', 'image', 'document', 'video']),
+        text: z.string().optional(),
+        image: z.object({ link: z.string().url() }).optional(),
+        document: z.object({ link: z.string().url() }).optional(),
+        video: z.object({ link: z.string().url() }).optional(),
+      })),
+    })).optional(),
+  }).optional(),
 }).refine(
   (data) => {
     if (data.type === 'text') return !!data.message
-    if (data.type === 'image' || data.type === 'video' || data.type === 'audio' || data.type === 'document') {
-      return !!(data.mediaUrl || data.mediaBase64)
-    }
+    if (['image', 'video', 'audio', 'document'].includes(data.type)) return !!(data.mediaUrl || data.mediaBase64)
     if (data.type === 'location') return data.latitude != null && data.longitude != null
     if (data.type === 'contact') return !!(data.contactName && data.contactPhone)
+    if (data.type === 'template') return !!data.template?.name
     return true
   },
   { message: 'Missing required fields for this message type' }

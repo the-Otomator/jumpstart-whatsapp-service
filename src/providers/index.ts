@@ -1,9 +1,13 @@
 import type { WhatsAppProvider, ProviderType } from './types'
 import { BaileysProvider } from './baileys/baileysProvider'
+import { MetaCloudProvider } from './meta-cloud/metaCloudProvider'
 
-const providers = {
-  baileys: new BaileysProvider(),
-} as unknown as Record<ProviderType, WhatsAppProvider>
+const metaCloudProvider = new MetaCloudProvider()
+
+const providers: Record<ProviderType, WhatsAppProvider> = {
+  'baileys': new BaileysProvider(),
+  'meta-cloud': metaCloudProvider,
+}
 
 export function getProvider(type: ProviderType = 'baileys'): WhatsAppProvider {
   const provider = providers[type]
@@ -21,6 +25,11 @@ export function getProviderForOrg(orgId: string): WhatsAppProvider | undefined {
 
 export function getAllProviders(): WhatsAppProvider[] {
   return Object.values(providers)
+}
+
+/** Get the MetaCloudProvider instance (needed for webhook route) */
+export function getMetaCloudProvider(): MetaCloudProvider {
+  return metaCloudProvider
 }
 
 export type { WhatsAppProvider, ProviderType, SendResult } from './types'

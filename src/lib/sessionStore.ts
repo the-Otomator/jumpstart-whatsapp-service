@@ -11,6 +11,10 @@ export interface SessionMeta {
   phoneNumber?: string
   lastConnected?: string
   autoRestore: boolean
+  // Meta Cloud specific
+  metaPhoneNumberId?: string
+  metaAccessToken?: string
+  metaWabaId?: string
 }
 
 const SESSIONS_DIR = path.join(process.cwd(), 'sessions')
@@ -75,7 +79,10 @@ export function listStoredSessions(): string[] {
 
   return fs.readdirSync(SESSIONS_DIR).filter((name) => {
     const dir = path.join(SESSIONS_DIR, name)
-    return fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, 'creds.json'))
+    return (
+      fs.statSync(dir).isDirectory() &&
+      (fs.existsSync(path.join(dir, 'creds.json')) || fs.existsSync(path.join(dir, 'meta.json')))
+    )
   })
 }
 

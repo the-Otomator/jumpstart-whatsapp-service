@@ -8,6 +8,7 @@ import { authMiddleware } from './auth'
 import sessionRoutes from './routes/sessions'
 import messageRoutes from './routes/messages'
 import connectRoutes from './routes/connect'
+import metaWebhookRoutes from './routes/meta-webhook'
 import { listActiveSessions, restoreSessions } from './sessionManager'
 import { logger } from './lib/logger'
 import { requestIdMiddleware } from './middleware/requestId'
@@ -97,6 +98,9 @@ app.get('/health', (_req, res) => {
 
 // ── Connect page (no auth — onboarding flow) ────────────────────
 app.use('/connect', connectRoutes)
+
+// ── Meta Cloud API webhook (no auth — called by Meta directly) ──
+app.use('/meta-webhook', metaWebhookRoutes)
 
 // ── API routes (auth + rate limit) ───────────────────────────────
 app.use('/api', apiLimiter, authMiddleware)

@@ -19,6 +19,19 @@ export type MessageType =
   | 'contact'
   | 'template'
 
+export interface TemplateComponent {
+  type: 'header' | 'body' | 'button'
+  parameters: TemplateParameter[]
+}
+
+export interface TemplateParameter {
+  type: 'text' | 'image' | 'document' | 'video'
+  text?: string
+  image?: { link: string }
+  document?: { link: string }
+  video?: { link: string }
+}
+
 export interface SendMessageRequest {
   orgId: string
   to: string // phone number with country code, e.g. "972501234567"
@@ -32,6 +45,12 @@ export interface SendMessageRequest {
   longitude?: number
   contactName?: string // for contact card
   contactPhone?: string
+  // Template fields (Meta Cloud only)
+  template?: {
+    name: string
+    language: string
+    components?: TemplateComponent[]
+  }
 }
 
 export interface ApiError {
