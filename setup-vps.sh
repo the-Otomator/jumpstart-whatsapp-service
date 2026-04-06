@@ -127,6 +127,7 @@ fi
 echo ""
 echo "=== 8. Docker Compose build & start ==="
 cd "$APP_DIR"
+docker network create web 2>/dev/null || true
 docker compose up -d --build
 echo "  ✓ Container started"
 sleep 5
