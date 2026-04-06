@@ -1,27 +1,180 @@
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
+import helmet from 'helmet'
+import { rateLimit } from 'express-rate-limit'
+import pinoHttp from 'pino-http'
+import * as os from 'os'
+import { exec } from 'child_process'
+import { promisify } from 'util'
 import { authMiddleware } from './auth'
 import sessionRoutes from './routes/sessions'
 import messageRoutes from './routes/messages'
-import { sessions } from './sessionManager'
+import connectRoutes from './routes/connect'
+import metaWebhookRoutes from './routes/meta-webhook'
+import { listActiveSessions, restoreSessions } from './sessionManager'
+import { logger } from './lib/logger'
+import { requestIdMiddleware } from './middleware/requestId'
+import { setupGracefulShutdown } from './lib/shutdown'
+
+const execAsync = promisify(exec)
+
+// ── In-memory error log (last 100 errors, used by /health) ────────
+interface ErrorEntry { time: number; msg: string }
+const recentErrorLog: ErrorEntry[] = []
+export function trackError(msg: string): void {
+  recentErrorLog.push({ time: Date.now(), msg })
+  if (recentErrorLog.length > 100) recentErrorLog.shift()
+}
+
+// ── Disk stats (Linux df) ─────────────────────────────────────────
+interface DiskStats { totalGB: number; usedGB: number; freeGB: number; percentUsed: number }
+async function getDiskStats(): Promise<DiskStats | null> {
+  try {
+    const { stdout } = await execAsync("df -B1 / | tail -1 | awk '{print $2, $3, $4}'")
+    const [total, used, free] = stdout.trim().split(' ').map(Number)
+    if (!total) return null
+    return {
+      totalGB: Math.round(total / 1e9 * 10) / 10,
+      usedGB: Math.round(used / 1e9 * 10) / 10,
+      freeGB: Math.round(free / 1e9 * 10) / 10,
+      percentUsed: Math.round((used / total) * 100),
+    }
+  } catch {
+    return null
+  }
+}
+
+// ── Validate required environment ────────────────────────────────
+if (!process.env.API_SECRET) {
+  logger.fatal('API_SECRET environment variable is required')
+  process.exit(1)
+}
 
 const app = express()
 const PORT = process.env.PORT ?? 3001
 
-app.use(express.json())
-app.use(cors({
-  origin: (process.env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
-}))
+// ── CORS + iframe embed (same list: fetch /status + <iframe src=/connect/...>) ──
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+const frameAncestors =
+  allowedOrigins.length > 0 ? (["'self'", ...allowedOrigins] as string[]) : (["'self'"] as string[])
 
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', sessions: sessions.size, uptime: process.uptime() })
+if (allowedOrigins.length === 0) {
+  logger.warn(
+    'ALLOWED_ORIGINS is empty — browsers will block fetch() to /connect/.../status and iframes from Jumpstart. Set comma-separated origins in .env (e.g. http://localhost:5174,https://hub.example.com).'
+  )
+} else {
+  logger.info(
+    { allowedOriginCount: allowedOrigins.length },
+    'CORS + frame-ancestors enabled for configured frontend origins'
+  )
+}
+
+// ── Security ─────────────────────────────────────────────────────
+app.use(
+  helmet({
+    // Default same-origin blocks cross-origin fetch of /status from Jumpstart even when CORS allows.
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"], // connect page
+        imgSrc: ["'self'", "data:"], // QR base64
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        frameAncestors, // without ALLOWED_ORIGINS only 'self' → iframe embed fails
+      },
+    },
+  })
+)
+app.use(express.json({ limit: '5mb' })) // allow media base64, but cap it
+app.use(requestIdMiddleware)
+
+app.use(cors({ origin: allowedOrigins.length > 0 ? allowedOrigins : false }))
+
+// ── Request logging ──────────────────────────────────────────────
+app.use(
+  pinoHttp({
+    logger: logger as any,
+    autoLogging: {
+      ignore: (req) => (req.url ?? '').startsWith('/health'),
+    },
+    customProps: (req) => ({ requestId: (req as express.Request).requestId }),
+  })
+)
+
+// ── Rate limiting (per IP, 100 requests/minute) ──────────────────
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 100,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests', code: 'RATE_LIMITED' },
 })
 
-app.use('/api', authMiddleware)
+// ── Health check (no auth) ───────────────────────────────────────
+app.get('/health', async (_req, res) => {
+  const sessionList = listActiveSessions()
+  const loadAvg = os.loadavg()
+  const totalMemoryMB = Math.round(os.totalmem() / 1024 / 1024)
+  const freeMemoryMB = Math.round(os.freemem() / 1024 / 1024)
+  const disk = await getDiskStats()
+  const hourAgo = Date.now() - 60 * 60 * 1_000
+  const recentErrors = recentErrorLog.filter((e) => e.time > hourAgo).length
+
+  res.json({
+    status: 'ok',
+    version: process.env.npm_package_version ?? '1.0.0',
+    hostname: os.hostname(),
+    sessions: sessionList.length,
+    connected: sessionList.filter((s) => s.status === 'connected').length,
+    uptime: Math.floor(process.uptime()),
+    memoryMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    totalMemoryMB,
+    freeMemoryMB,
+    loadAvg: {
+      '1min': Math.round(loadAvg[0] * 100) / 100,
+      '5min': Math.round(loadAvg[1] * 100) / 100,
+      '15min': Math.round(loadAvg[2] * 100) / 100,
+    },
+    disk,
+    recentErrors,
+  })
+})
+
+// ── Connect page (no auth — onboarding flow) ────────────────────
+app.use('/connect', connectRoutes)
+
+// ── Meta Cloud API webhook (no auth — called by Meta directly) ──
+app.use('/meta-webhook', metaWebhookRoutes)
+
+// ── API routes (auth + rate limit) ───────────────────────────────
+app.use('/api', apiLimiter, authMiddleware)
 app.use('/api/sessions', sessionRoutes)
 app.use('/api/messages', messageRoutes)
 
-app.listen(PORT, () => {
-  console.log(`[whatsapp-service] listening on port ${PORT}`)
+// ── Global error handler ─────────────────────────────────────────
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  logger.error({ err: err.message, stack: err.stack }, 'Unhandled error')
+  res.status(500).json({
+    error: 'Internal server error',
+    code: 'INTERNAL_ERROR',
+  })
 })
+
+// ── Start server ─────────────────────────────────────────────────
+const server = app.listen(PORT, async () => {
+  logger.info({ port: PORT }, 'WhatsApp service started')
+
+  // Auto-restore previously connected sessions
+  try {
+    await restoreSessions()
+  } catch (err) {
+    logger.error({ err }, 'Error during session restore')
+  }
+})
+
+// ── Graceful shutdown ────────────────────────────────────────────
+setupGracefulShutdown(server)

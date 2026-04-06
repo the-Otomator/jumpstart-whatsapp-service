@@ -70,7 +70,7 @@ nano .env
 
 Fill in:
 - `API_SECRET` — generate with `openssl rand -hex 16`
-- `ALLOWED_ORIGINS` — your frontend domain(s), comma-separated
+- `ALLOWED_ORIGINS` — frontend origin(s), comma-separated (e.g. `http://localhost:5174`, production hub URL). Used for **CORS** and Helmet **`frame-ancestors`** so Jumpstart can call `/connect/.../status` and embed `/connect/...` in an iframe.
 
 ---
 
@@ -146,6 +146,13 @@ GET /api/sessions/{orgId}/status
 ```
 POST /api/messages/send
 Body: { "orgId": "org_123", "to": "972509876543", "message": "Hello!" }
+```
+
+### Send a message (session path alias)
+Same behavior as above; `orgId` comes from the URL.
+```
+POST /api/sessions/{orgId}/send
+Body: { "to": "972509876543", "message": "Hello!" }
 ```
 
 ### Send bulk messages (1.5s delay between each)

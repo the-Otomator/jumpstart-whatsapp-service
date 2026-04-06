@@ -1,0 +1,31 @@
+services:
+  whatsapp-service:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PORT:-3001}:3001"
+    env_file:
+      - .env
+    volumes:
+      - sessions-data:/app/sessions
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.whatsapp.rule=Host(`${WA_HOST:-wa.otomator.pro}`)
+      - traefik.http.routers.whatsapp.entrypoints=web,websecure
+      - traefik.http.routers.whatsapp.tls=true
+      - traefik.http.routers.whatsapp.tls.certresolver=mytlschallenge
+      - traefik.http.services.whatsapp.loadbalancer.server.port=3001
+
+volumes:
+  sessions-data:
+
+networks:
+  web:
+    external: true
