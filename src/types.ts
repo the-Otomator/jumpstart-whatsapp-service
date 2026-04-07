@@ -7,6 +7,7 @@ export interface Session {
   qr?: string
   phoneNumber?: string
   webhookUrl?: string
+  partnerName?: string
 }
 
 export type MessageType =
@@ -34,18 +35,17 @@ export interface TemplateParameter {
 
 export interface SendMessageRequest {
   orgId: string
-  to: string // phone number with country code, e.g. "972501234567"
+  to: string
   type: MessageType
-  message?: string // text content or caption for media
-  mediaUrl?: string // URL to download media from
-  mediaBase64?: string // direct base64-encoded media
-  mimetype?: string // e.g. "application/pdf"
-  filename?: string // for documents
-  latitude?: number // for location
+  message?: string
+  mediaUrl?: string
+  mediaBase64?: string
+  mimetype?: string
+  filename?: string
+  latitude?: number
   longitude?: number
-  contactName?: string // for contact card
+  contactName?: string
   contactPhone?: string
-  // Template fields (Meta Cloud only)
   template?: {
     name: string
     language: string
