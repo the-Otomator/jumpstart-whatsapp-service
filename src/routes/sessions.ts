@@ -92,11 +92,20 @@ router.post(
     }
 
     try {
+      let partnerName: string | undefined
+      if (supabase && providerType !== 'meta-cloud') {
+        const { data } = await supabase
+          .from('partner_org_slots')
+          .select('partner_name')
+          .eq('org_id', orgId)
+          .single()
+        partnerName = data?.partner_name ?? undefined
+      }
       await startSession(orgId, webhookUrl, providerType ?? 'baileys', {
         accessToken: metaAccessToken,
         phoneNumberId: metaPhoneNumberId,
         wabaId: metaWabaId,
-      })
+      }, partnerName)
       log.info({ provider: providerType ?? 'baileys' }, 'Session start requested')
       const initialStatus = providerType === 'meta-cloud' ? 'connected' : 'connecting'
       res.json({ success: true, orgId, status: initialStatus, provider: providerType ?? 'baileys' })
