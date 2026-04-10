@@ -32,6 +32,17 @@ export async function validateOrg(orgId: string): Promise<{
   }
 
   try {
+    // Resolve session_key -> org_id for multi-device sessions (e.g. "uuid-8char" suffix)
+    const { data: deviceRow } = await supabase
+      .from('whatsapp_devices')
+      .select('org_id')
+      .eq('session_key', orgId)
+      .maybeSingle()
+    if (deviceRow?.org_id) {
+      logger.debug({ sessionKey: orgId, orgId: deviceRow.org_id }, 'Resolved session_key to org_id')
+      orgId = deviceRow.org_id
+    }
+
     const { data: central, error: centralErr } = await supabase
       .from('central_subscriptions')
       .select('org_id, plan, status, user_email, organization_name, product_id')
