@@ -92,20 +92,11 @@ router.post(
     }
 
     try {
-      let partnerName: string | undefined
-      if (supabase && providerType !== 'meta-cloud') {
-        const { data } = await supabase
-          .from('partner_org_slots')
-          .select('partner_name')
-          .eq('org_id', orgId)
-          .single()
-        partnerName = data?.partner_name ?? undefined
-      }
       await startSession(orgId, webhookUrl, providerType ?? 'baileys', {
         accessToken: metaAccessToken,
         phoneNumberId: metaPhoneNumberId,
         wabaId: metaWabaId,
-      }, partnerName)
+      })
       log.info({ provider: providerType ?? 'baileys' }, 'Session start requested')
       const initialStatus = providerType === 'meta-cloud' ? 'connected' : 'connecting'
       res.json({ success: true, orgId, status: initialStatus, provider: providerType ?? 'baileys' })
@@ -208,14 +199,12 @@ router.get(
   (req: Request, res: Response) => {
     const { orgId } = req.params
     const qr = getQR(orgId)
+    const session = getStatus(orgId)
     if (!qr) {
-      res.status(404).json({
-        error: 'No QR available — session not in QR state',
-        code: 'QR_NOT_AVAILABLE',
-      })
+      res.status(404).json({ qr: null, status: session?.status ?? 'not_found' })
       return
     }
-    res.json({ qr })
+    res.json({ qr, status: 'qr' })
   }
 )
 
@@ -227,14 +216,15 @@ router.get(
     const { orgId } = req.params
     const session = getStatus(orgId)
     if (!session) {
-      res.status(404).json({
-        error: 'Session not found',
-        code: 'SESSION_NOT_FOUND',
-      })
+      res.status(404).json({ status: 'not_found', qr: null })
       return
     }
-    const { qr, ...status } = session
-    res.json(status)
+    res.json({
+      status: session.status,
+      qr: session.qr ?? null,
+      phoneNumber: session.phoneNumber ?? null,
+      provider: session.provider,
+    })
   }
 )
 

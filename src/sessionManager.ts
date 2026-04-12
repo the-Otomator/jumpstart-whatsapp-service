@@ -10,14 +10,14 @@ export async function startSession(
   orgId: string,
   webhookUrl?: string,
   providerType: ProviderType = 'baileys',
-  metaConfig?: { accessToken?: string; phoneNumberId?: string; wabaId?: string },
-  partnerName?: string
+  metaConfig?: { accessToken?: string; phoneNumberId?: string; wabaId?: string }
 ): Promise<void> {
   const provider = getProvider(providerType)
+  // For meta-cloud, the start() method accepts config as 3rd argument
   if (providerType === 'meta-cloud') {
     await (provider as any).start(orgId, webhookUrl, metaConfig)
   } else {
-    await (provider as any).start(orgId, webhookUrl, partnerName)
+    await provider.start(orgId, webhookUrl)
   }
 }
 
