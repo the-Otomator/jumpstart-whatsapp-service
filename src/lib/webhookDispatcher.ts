@@ -1,5 +1,14 @@
 import { logger } from './logger'
 
+const WEBHOOK_OUTBOUND_SECRET = process.env.WEBHOOK_OUTBOUND_SECRET ?? ''
+
+if (!WEBHOOK_OUTBOUND_SECRET) {
+  logger.warn(
+    'WEBHOOK_OUTBOUND_SECRET is not set — outbound webhooks will be sent WITHOUT auth. ' +
+    'Set it in .env before production traffic.'
+  )
+}
+
 interface WebhookFailure {
   orgId: string
   url: string
@@ -21,9 +30,17 @@ async function attemptPost(url: string, payload: object, attempt: number): Promi
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 10000) // 10s timeout
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'jumpstart-whatsapp-service',
+    }
+    if (WEBHOOK_OUTBOUND_SECRET) {
+      headers['Authorization'] = `Bearer ${WEBHOOK_OUTBOUND_SECRET}`
+    }
+
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
       signal: controller.signal,
     })
