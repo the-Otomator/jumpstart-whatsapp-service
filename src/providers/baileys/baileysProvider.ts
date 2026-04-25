@@ -198,6 +198,30 @@ export class BaileysProvider implements WhatsAppProvider {
         }
       }
     })
+
+    sock.ev.on('group-participants.update', async (ev) => {
+      const systemJid = sock.user?.id ?? ''
+      const botRemoved =
+        ev.action === 'remove' && ev.participants.includes(systemJid)
+
+      if (botRemoved) {
+        log.warn({ groupJid: ev.id }, 'System number was kicked from group')
+      } else {
+        log.debug({ groupJid: ev.id, action: ev.action, count: ev.participants.length }, 'Group participants updated')
+      }
+
+      if (webhookUrl) {
+        await postWebhook(webhookUrl, {
+          event: 'group_participants_update',
+          orgId,
+          groupJid: ev.id,
+          action: ev.action,
+          participants: ev.participants,
+          by: (ev as any).author ?? null,
+          bot_removed: botRemoved,
+        })
+      }
+    })
   }
 
   stop(orgId: string, options?: { keepAuthFiles?: boolean; purgeAuthDir?: boolean }): void {
@@ -237,6 +261,11 @@ export class BaileysProvider implements WhatsAppProvider {
     const content = await buildMessageContent(req)
     const result = await sock.sendMessage(jid, content)
     return { messageId: result?.key?.id ?? '' }
+  }
+
+  /** Expose the raw Baileys socket for group operations (Baileys-only). */
+  getSocket(orgId: string): ReturnType<typeof makeWASocket> | undefined {
+    return this.sockets.get(orgId)
   }
 
   listActiveSessions(): Session[] {

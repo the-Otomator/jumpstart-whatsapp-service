@@ -58,3 +58,58 @@ export interface ApiError {
   code: string
   details?: unknown
 }
+
+// ── Group types ──────────────────────────────────────────────────
+
+export interface GroupCreateRequest {
+  subject: string
+  participants: string[]  // phone numbers (digits only)
+  iconUrl?: string
+  description?: string
+}
+
+export interface GroupParticipantsRequest {
+  participants: string[]  // phone numbers (digits only)
+}
+
+export interface GroupParticipantResult {
+  phone: string
+  status: string
+  inviteFallback?: string
+}
+
+export interface GroupCreateResponse {
+  groupJid: string
+  inviteLink: string
+  participants: GroupParticipantResult[]
+}
+
+export interface GroupMetadataParticipant {
+  phone: string
+  isAdmin: boolean
+  isSuperAdmin: boolean
+}
+
+export interface GroupMetadataResponse {
+  subject: string
+  description: string | null
+  participants: GroupMetadataParticipant[]
+  owner: string | null
+}
+
+export interface AdminedGroup {
+  groupJid: string
+  subject: string
+  memberCount: number
+  admins: string[]
+}
+
+export interface GroupParticipantsUpdateWebhook {
+  event: 'group_participants_update'
+  orgId: string
+  groupJid: string
+  action: 'add' | 'remove' | 'promote' | 'demote'
+  participants: string[]
+  by: string | null
+  bot_removed: boolean
+}

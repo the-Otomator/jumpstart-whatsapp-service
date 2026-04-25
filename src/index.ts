@@ -10,6 +10,7 @@ import { promisify } from 'util'
 import { authMiddleware } from './auth'
 import sessionRoutes from './routes/sessions'
 import messageRoutes from './routes/messages'
+import groupRoutes from './routes/groups'
 import connectRoutes from './routes/connect'
 import metaWebhookRoutes from './routes/meta-webhook'
 import { listActiveSessions, restoreSessions } from './sessionManager'
@@ -154,6 +155,7 @@ app.use('/meta-webhook', metaWebhookRoutes)
 app.use('/api', apiLimiter, authMiddleware)
 app.use('/api/sessions', sessionRoutes)
 app.use('/api/messages', messageRoutes)
+app.use('/api/groups', groupRoutes)
 
 // ── Global error handler ─────────────────────────────────────────
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

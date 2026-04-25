@@ -5,6 +5,8 @@ import {
   getAllProviders,
   type ProviderType,
 } from './providers'
+import { BaileysProvider } from './providers/baileys/baileysProvider'
+import makeWASocket from '@whiskeysockets/baileys'
 
 export async function startSession(
   orgId: string,
@@ -51,6 +53,12 @@ export async function migrateSession(
 
 export function listActiveSessions(): Session[] {
   return getAllProviders().flatMap((p) => p.listActiveSessions())
+}
+
+/** Get the raw Baileys socket for an org (undefined if not a Baileys session or not connected). */
+export function getBaileysSocket(orgId: string): ReturnType<typeof makeWASocket> | undefined {
+  const provider = getProvider('baileys') as BaileysProvider
+  return provider.getSocket(orgId)
 }
 
 export async function restoreSessions(): Promise<void> {
