@@ -10,6 +10,7 @@ import { promisify } from 'util'
 import { authMiddleware } from './auth'
 import sessionRoutes from './routes/sessions'
 import messageRoutes from './routes/messages'
+import globalmaxRouter from './routes/globalmax'
 import connectRoutes from './routes/connect'
 import metaWebhookRoutes from './routes/meta-webhook'
 import { listActiveSessions, restoreSessions } from './sessionManager'
@@ -55,21 +56,44 @@ const app = express()
 const PORT = process.env.PORT ?? 3001
 
 // ── CORS + iframe embed (same list: fetch /status + <iframe src=/connect/...>) ──
+//
+// Wildcard subdomain patterns — these always apply regardless of ALLOWED_ORIGINS.
+// Each regex is tested against the full Origin header value.
+const builtInPatterns: RegExp[] = [
+  /^https:\/\/[a-z0-9-]+\.workmatch\.space$/,   // *.workmatch.space
+  /^https:\/\/[a-z0-9-]+\.otomator\.co\.il$/,    // *.otomator.co.il
+  /^https?:\/\/localhost(:\d+)?$/,                // localhost (any port, http or https)
+]
+
+// Explicit origins from env (exact matches, for non-wildcard domains)
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean)
-const frameAncestors =
-  allowedOrigins.length > 0 ? (["'self'", ...allowedOrigins] as string[]) : (["'self'"] as string[])
+const allowedOriginSet = new Set(allowedOrigins)
+
+// Check whether a given origin is allowed (patterns OR explicit list)
+function isOriginAllowed(origin: string): boolean {
+  if (allowedOriginSet.has(origin)) return true
+  return builtInPatterns.some((re) => re.test(origin))
+}
+
+// frame-ancestors needs explicit entries — keep env origins + wildcard CSP tokens
+const frameAncestors: string[] = [
+  "'self'",
+  '*.workmatch.space',
+  '*.otomator.co.il',
+  ...allowedOrigins,
+]
 
 if (allowedOrigins.length === 0) {
-  logger.warn(
-    'ALLOWED_ORIGINS is empty — browsers will block fetch() to /connect/.../status and iframes from Jumpstart. Set comma-separated origins in .env (e.g. http://localhost:5174,https://hub.example.com).'
+  logger.info(
+    'ALLOWED_ORIGINS is empty — using built-in wildcard patterns only (*.workmatch.space, *.otomator.co.il, localhost).'
   )
 } else {
   logger.info(
     { allowedOriginCount: allowedOrigins.length },
-    'CORS + frame-ancestors enabled for configured frontend origins'
+    'CORS + frame-ancestors enabled for configured + built-in origins'
   )
 }
 
@@ -92,7 +116,16 @@ app.use(
 app.use(express.json({ limit: '5mb' })) // allow media base64, but cap it
 app.use(requestIdMiddleware)
 
-app.use(cors({ origin: allowedOrigins.length > 0 ? allowedOrigins : false }))
+app.use(
+  cors({
+    origin(requestOrigin, callback) {
+      // Allow requests with no Origin header (e.g. server-to-server, curl)
+      if (!requestOrigin) return callback(null, true)
+      if (isOriginAllowed(requestOrigin)) return callback(null, requestOrigin)
+      callback(null, false)
+    },
+  })
+)
 
 // ── Request logging ──────────────────────────────────────────────
 app.use(
@@ -154,6 +187,7 @@ app.use('/meta-webhook', metaWebhookRoutes)
 app.use('/api', apiLimiter, authMiddleware)
 app.use('/api/sessions', sessionRoutes)
 app.use('/api/messages', messageRoutes)
+app.use('/api/globalmax', authMiddleware, globalmaxRouter)
 
 // ── Global error handler ─────────────────────────────────────────
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
