@@ -125,3 +125,32 @@ export function validateParams(schema: z.ZodSchema) {
 
 /** Params schema for routes with :orgId */
 export const orgIdParamsSchema = z.object({ orgId: orgIdSchema })
+
+// ── Group schemas ───────────────────────────────────────────────
+
+/** groupJid: <id>@g.us */
+export const groupJidSchema = z
+  .string()
+  .regex(/^\d+@g\.us$/, 'groupJid must be in format <number>@g.us')
+
+export const groupParamsSchema = z.object({
+  orgId: orgIdSchema,
+  groupJid: groupJidSchema,
+})
+
+export const groupCreateSchema = z.object({
+  subject: z.string().min(1).max(100),
+  participants: z.array(phoneSchema).min(1).max(512),
+  iconUrl: z.string().url().optional(),
+  description: z.string().max(512).optional(),
+})
+
+export const groupParticipantsSchema = z.object({
+  participants: z.array(phoneSchema).min(1).max(512),
+})
+
+export const groupSendSchema = z.object({
+  text: z.string().min(1).max(4096).optional(),
+  media: z.string().optional(),
+  mediaType: z.enum(['image', 'video', 'audio', 'document']).optional(),
+}).refine((d) => d.text || d.media, { message: 'text or media is required' })
