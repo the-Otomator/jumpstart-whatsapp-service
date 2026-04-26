@@ -104,6 +104,26 @@ export interface AdminedGroup {
   admins: string[]
 }
 
+export interface GroupDescriptionRequest {
+  description: string
+}
+
+export interface GroupIconRequest {
+  url: string
+}
+
+export interface GroupSendPermissionRequest {
+  mode: 'admins' | 'all'
+}
+
+export interface GroupEditInfoPermissionRequest {
+  mode: 'admins' | 'all'
+}
+
+export interface GroupApprovalModeRequest {
+  enabled: boolean
+}
+
 export interface GroupParticipantsUpdateWebhook {
   event: 'group_participants_update'
   orgId: string
