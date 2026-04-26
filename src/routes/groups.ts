@@ -8,6 +8,11 @@ import {
   groupCreateSchema,
   groupParticipantsSchema,
   groupSendSchema,
+  groupDescriptionSchema,
+  groupIconSchema,
+  groupSendPermissionSchema,
+  groupEditInfoPermissionSchema,
+  groupApprovalModeSchema,
 } from '../middleware/validate'
 import { toJid, jidToPhone } from '../lib/phone'
 import { orgLogger } from '../lib/logger'
@@ -18,6 +23,11 @@ import type {
   GroupParticipantResult,
   GroupMetadataParticipant,
   AdminedGroup,
+  GroupDescriptionRequest,
+  GroupIconRequest,
+  GroupSendPermissionRequest,
+  GroupEditInfoPermissionRequest,
+  GroupApprovalModeRequest,
 } from '../types'
 
 const router = Router()
@@ -334,6 +344,148 @@ router.get(
     } catch (err) {
       log.error({ err: (err as Error).message }, 'Failed to list admined groups')
       res.status(500).json({ error: (err as Error).message, code: 'GROUP_LIST_FAILED' })
+    }
+  }
+)
+
+// ── POST /api/groups/:orgId/:groupJid/description ───────────────
+router.post(
+  '/:orgId/:groupJid/description',
+  validateParams(groupParamsSchema),
+  validateBody(groupDescriptionSchema),
+  async (req: Request, res: Response) => {
+    const { orgId, groupJid } = req.params
+    const { description } = req.body as GroupDescriptionRequest
+    const log = orgLogger(orgId)
+
+    const sock = requireSocket(orgId, res)
+    if (!sock) return
+
+    try {
+      await sock.groupUpdateDescription(groupJid, description)
+      log.info({ groupJid }, 'Group description updated')
+      res.json({ ok: true })
+    } catch (err) {
+      log.error({ groupJid, err: (err as Error).message }, 'Failed to update group description')
+      res.status(500).json({ error: (err as Error).message, code: 'GROUP_DESCRIPTION_FAILED' })
+    }
+  }
+)
+
+// ── POST /api/groups/:orgId/:groupJid/icon ──────────────────────
+router.post(
+  '/:orgId/:groupJid/icon',
+  validateParams(groupParamsSchema),
+  validateBody(groupIconSchema),
+  async (req: Request, res: Response) => {
+    const { orgId, groupJid } = req.params
+    const { url } = req.body as GroupIconRequest
+    const log = orgLogger(orgId)
+
+    const sock = requireSocket(orgId, res)
+    if (!sock) return
+
+    try {
+      const imgRes = await fetch(url)
+      if (!imgRes.ok) {
+        res.status(400).json({ error: 'Failed to fetch icon URL', code: 'ICON_FETCH_FAILED' })
+        return
+      }
+      const contentType = imgRes.headers.get('content-type') ?? ''
+      if (!contentType.startsWith('image/')) {
+        res.status(400).json({ error: 'URL must point to an image', code: 'ICON_INVALID_CONTENT_TYPE' })
+        return
+      }
+      const contentLength = Number(imgRes.headers.get('content-length') ?? 0)
+      if (contentLength > 5_000_000) {
+        res.status(400).json({ error: 'Image exceeds 5 MB limit', code: 'ICON_TOO_LARGE' })
+        return
+      }
+      const buf = Buffer.from(await imgRes.arrayBuffer())
+      if (buf.length > 5_000_000) {
+        res.status(400).json({ error: 'Image exceeds 5 MB limit', code: 'ICON_TOO_LARGE' })
+        return
+      }
+      await sock.updateProfilePicture(groupJid, buf)
+      log.info({ groupJid, url }, 'Group icon updated')
+      res.json({ ok: true })
+    } catch (err) {
+      log.error({ groupJid, err: (err as Error).message }, 'Failed to update group icon')
+      res.status(500).json({ error: (err as Error).message, code: 'GROUP_ICON_FAILED' })
+    }
+  }
+)
+
+// ── POST /api/groups/:orgId/:groupJid/send-permission ──────────
+router.post(
+  '/:orgId/:groupJid/send-permission',
+  validateParams(groupParamsSchema),
+  validateBody(groupSendPermissionSchema),
+  async (req: Request, res: Response) => {
+    const { orgId, groupJid } = req.params
+    const { mode } = req.body as GroupSendPermissionRequest
+    const log = orgLogger(orgId)
+
+    const sock = requireSocket(orgId, res)
+    if (!sock) return
+
+    try {
+      const setting = mode === 'admins' ? 'announcement' : 'not_announcement'
+      await sock.groupSettingUpdate(groupJid, setting)
+      log.info({ groupJid, mode }, 'Group send permission updated')
+      res.json({ ok: true })
+    } catch (err) {
+      log.error({ groupJid, err: (err as Error).message }, 'Failed to update group send permission')
+      res.status(500).json({ error: (err as Error).message, code: 'GROUP_SEND_PERMISSION_FAILED' })
+    }
+  }
+)
+
+// ── POST /api/groups/:orgId/:groupJid/edit-info-permission ──────
+router.post(
+  '/:orgId/:groupJid/edit-info-permission',
+  validateParams(groupParamsSchema),
+  validateBody(groupEditInfoPermissionSchema),
+  async (req: Request, res: Response) => {
+    const { orgId, groupJid } = req.params
+    const { mode } = req.body as GroupEditInfoPermissionRequest
+    const log = orgLogger(orgId)
+
+    const sock = requireSocket(orgId, res)
+    if (!sock) return
+
+    try {
+      const setting = mode === 'admins' ? 'locked' : 'unlocked'
+      await sock.groupSettingUpdate(groupJid, setting)
+      log.info({ groupJid, mode }, 'Group edit-info permission updated')
+      res.json({ ok: true })
+    } catch (err) {
+      log.error({ groupJid, err: (err as Error).message }, 'Failed to update group edit-info permission')
+      res.status(500).json({ error: (err as Error).message, code: 'GROUP_EDIT_INFO_PERMISSION_FAILED' })
+    }
+  }
+)
+
+// ── POST /api/groups/:orgId/:groupJid/approval-mode ─────────────
+router.post(
+  '/:orgId/:groupJid/approval-mode',
+  validateParams(groupParamsSchema),
+  validateBody(groupApprovalModeSchema),
+  async (req: Request, res: Response) => {
+    const { orgId, groupJid } = req.params
+    const { enabled } = req.body as GroupApprovalModeRequest
+    const log = orgLogger(orgId)
+
+    const sock = requireSocket(orgId, res)
+    if (!sock) return
+
+    try {
+      await sock.groupJoinApprovalMode(groupJid, enabled ? 'on' : 'off')
+      log.info({ groupJid, enabled }, 'Group approval mode updated')
+      res.json({ ok: true })
+    } catch (err) {
+      log.error({ groupJid, err: (err as Error).message }, 'Failed to update group approval mode')
+      res.status(500).json({ error: (err as Error).message, code: 'GROUP_APPROVAL_MODE_FAILED' })
     }
   }
 )

@@ -154,3 +154,23 @@ export const groupSendSchema = z.object({
   media: z.string().optional(),
   mediaType: z.enum(['image', 'video', 'audio', 'document']).optional(),
 }).refine((d) => d.text || d.media, { message: 'text or media is required' })
+
+export const groupDescriptionSchema = z.object({
+  description: z.string().max(512),
+})
+
+export const groupIconSchema = z.object({
+  url: z.string().url().startsWith('https', 'Icon URL must use HTTPS'),
+})
+
+export const groupSendPermissionSchema = z.object({
+  mode: z.enum(['admins', 'all']),
+})
+
+export const groupEditInfoPermissionSchema = z.object({
+  mode: z.enum(['admins', 'all']),
+})
+
+export const groupApprovalModeSchema = z.object({
+  enabled: z.boolean(),
+})
