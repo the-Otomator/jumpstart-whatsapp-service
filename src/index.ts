@@ -142,7 +142,7 @@ app.use(
 // Rate limiting (per IP, 100 requests/minute)
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: 100,
+  limit: 1000,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many requests', code: 'RATE_LIMITED' },
