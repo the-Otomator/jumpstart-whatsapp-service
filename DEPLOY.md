@@ -166,6 +166,48 @@ Body: [{ "orgId": "org_123", "to": "972509876543", "message": "Hi" }, ...]
 DELETE /api/sessions/{orgId}
 ```
 
+### Lookup a contact's WhatsApp profile
+Returns profile picture, "About" status, and (for business accounts) the
+business profile in one shot. Responses are cached per `(orgId, phone)` for 6
+hours; pass `X-Cache: HIT|MISS` is set on the response header.
+
+`:phone` accepts E.164 (`+972501234567`), international digits
+(`972501234567`), or Israeli local format (`050-1234567`); the service
+normalizes before talking to WhatsApp. Remember to URL-encode `+`.
+```
+GET /api/contacts/{phone}/profile?orgId=org_123
+→ {
+    "success": true,
+    "phone": "972501234567",
+    "exists_on_whatsapp": true,
+    "profile_picture_url": "https://pps.whatsapp.net/...",
+    "about": "Available",
+    "business_profile": {                    // omitted for non-business accounts
+      "description": "...",
+      "category": "...",
+      "email": "...",
+      "websites": ["..."],
+      "address": "...",
+      "business_hours": {
+        "timezone": "Asia/Jerusalem",
+        "schedule": [{ "day_of_week": "mon", "mode": "open", "open_time": 540, "close_time": 1080 }]
+      }
+    }
+  }
+```
+If the number isn't on WhatsApp:
+```
+→ { "success": true, "phone": "972501234567", "exists_on_whatsapp": false }
+```
+
+### Fast existence check
+Skips the picture/about/business fetches when you only need to know whether a
+number is on WhatsApp.
+```
+GET /api/contacts/{phone}/exists?orgId=org_123
+→ { "success": true, "phone": "972501234567", "exists_on_whatsapp": true, "jid": "972501234567@s.whatsapp.net" }
+```
+
 ### Health check (no auth required)
 ```
 GET /health

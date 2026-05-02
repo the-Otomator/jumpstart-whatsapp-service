@@ -124,6 +124,44 @@ export interface GroupApprovalModeRequest {
   enabled: boolean
 }
 
+// ── Contact profile types ───────────────────────────────────────
+
+export interface ContactBusinessHours {
+  /** ISO weekday (1=Mon..7=Sun) → list of {open, close} HH:mm windows */
+  timezone?: string
+  schedule?: Array<{
+    day_of_week: string
+    mode: string
+    open_time?: number
+    close_time?: number
+  }>
+}
+
+export interface ContactBusinessProfile {
+  description?: string | null
+  category?: string | null
+  email?: string | null
+  websites?: string[]
+  address?: string | null
+  business_hours?: ContactBusinessHours | null
+}
+
+export interface ContactProfileResponse {
+  success: true
+  phone: string
+  exists_on_whatsapp: boolean
+  profile_picture_url?: string | null
+  about?: string | null
+  business_profile?: ContactBusinessProfile | null
+}
+
+export interface ContactExistsResponse {
+  success: true
+  phone: string
+  exists_on_whatsapp: boolean
+  jid?: string
+}
+
 export interface GroupParticipantsUpdateWebhook {
   event: 'group_participants_update'
   orgId: string
