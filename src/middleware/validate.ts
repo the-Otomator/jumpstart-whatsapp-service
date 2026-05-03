@@ -126,6 +126,46 @@ export function validateParams(schema: z.ZodSchema) {
 /** Params schema for routes with :orgId */
 export const orgIdParamsSchema = z.object({ orgId: orgIdSchema })
 
+// ── Contact profile schemas ─────────────────────────────────────
+
+/**
+ * Permissive phone for contact lookup: allows `+`, spaces, dashes, parens.
+ * Normalization (stripping separators, mapping Israeli local 05x → 972...)
+ * is done by `normalizePhone()` from lib/phone before calling Baileys.
+ */
+export const flexiblePhoneSchema = z
+  .string()
+  .min(1, 'phone is required')
+  .max(32, 'phone too long')
+  .regex(/^[+\d][\d\s().+-]*$/, 'phone must contain digits and optional + ( ) - space')
+
+export const contactPhoneParamsSchema = z.object({
+  phone: flexiblePhoneSchema,
+})
+
+export const contactOrgIdQuerySchema = z.object({
+  orgId: orgIdSchema,
+})
+
+export function validateQuery(schema: z.ZodSchema) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const result = schema.safeParse(req.query)
+    if (!result.success) {
+      const errors = result.error.issues.map((i) => ({
+        path: i.path.join('.'),
+        message: i.message,
+      }))
+      res.status(400).json({
+        error: 'Invalid query parameters',
+        code: 'VALIDATION_ERROR',
+        details: errors,
+      })
+      return
+    }
+    next()
+  }
+}
+
 // ── Group schemas ───────────────────────────────────────────────
 
 /** groupJid: <id>@g.us */
