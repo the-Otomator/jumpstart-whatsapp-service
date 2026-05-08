@@ -14,6 +14,8 @@ import type { WhatsAppProvider, SendResult, ProviderType } from '../types'
 import type { Session, SendMessageRequest } from '../../types'
 import { logger, orgLogger } from '../../lib/logger'
 import { postWebhook, rekeyWebhookFailures } from '../../lib/webhookDispatcher'
+import { getRules } from '../../lib/intentRulesStore'
+import { classifyMessage } from '../../lib/intentClassifier'
 import {
   saveSessionMeta,
   loadSessionMeta,
@@ -168,6 +170,24 @@ export class BaileysProvider implements WhatsAppProvider {
         }
 
         log.debug({ from: senderPhone, isGroup, mediaType }, 'Incoming message')
+
+        // Intent classification is best-effort and must never block webhook delivery.
+        if (!isGroup && textContent) {
+          try {
+            const rules = await getRules(orgId)
+            if (rules.length > 0) {
+              const result = await classifyMessage(textContent, rules)
+              if (result) {
+                payload.intent = result.intent
+                payload.intentLabel = result.intentLabel
+                payload.confidence = result.confidence
+                payload.allScores = result.allScores
+              }
+            }
+          } catch (err) {
+            log.warn({ err }, 'Intent classification failed - sending webhook without intent')
+          }
+        }
 
         if (webhookUrl) await postWebhook(webhookUrl, payload)
       }

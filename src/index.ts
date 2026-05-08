@@ -18,6 +18,7 @@ import { listActiveSessions, restoreSessions } from './sessionManager'
 import { logger } from './lib/logger'
 import { requestIdMiddleware } from './middleware/requestId'
 import { setupGracefulShutdown } from './lib/shutdown'
+import { invalidateCache } from './lib/intentRulesStore'
 
 const execAsync = promisify(exec)
 
@@ -190,6 +191,12 @@ app.use('/api/sessions', sessionRoutes)
 app.use('/api/messages', messageRoutes)
 app.use('/api/globalmax', authMiddleware, globalmaxRouter)
 app.use('/api/groups', groupRoutes)
+
+app.post('/api/intents/invalidate/:orgId', authMiddleware, (req, res) => {
+  const { orgId } = req.params
+  invalidateCache(orgId)
+  res.json({ ok: true })
+})
 
 // Global error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
