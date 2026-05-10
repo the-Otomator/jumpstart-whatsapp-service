@@ -40,10 +40,10 @@ router.get('/:orgId', async (req: Request, res: Response) => {
     return
   }
 
-  // Auto-start session if not already running
+  // Auto-start session if not running or disconnected (so connect page always generates a fresh QR)
   const status = getStatus(orgId)
-  if (!status) {
-    log.info('Auto-starting session from connect page')
+  if (!status || status.status === 'disconnected') {
+    log.info({ prevStatus: status?.status ?? 'none' }, 'Auto-starting session from connect page')
     try {
       await startSession(orgId)
     } catch (err) {
