@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express'
-import { getQR, getStatus, startSession } from '../sessionManager'
+import { getQR, getStatus, startSession, stopSession } from '../sessionManager'
 import { orgLogger } from '../lib/logger'
 import { validateOrg } from '../lib/supabase'
 
@@ -40,11 +40,17 @@ router.get('/:orgId', async (req: Request, res: Response) => {
     return
   }
 
-  // Auto-start session if not running or disconnected (so connect page always generates a fresh QR)
+  // Auto-start session if not running or disconnected
+  // For disconnected sessions: purge stale creds first so a fresh QR is always generated
   const status = getStatus(orgId)
   if (!status || status.status === 'disconnected') {
     log.info({ prevStatus: status?.status ?? 'none' }, 'Auto-starting session from connect page')
     try {
+      if (status?.status === 'disconnected') {
+        stopSession(orgId, { purgeAuthDir: true })
+        // Brief pause so Baileys finishes cleanup before re-init
+        await new Promise((r) => setTimeout(r, 500))
+      }
       await startSession(orgId)
     } catch (err) {
       log.error({ err }, 'Failed to auto-start session from connect page')
@@ -351,3 +357,15 @@ function renderErrorPage(orgId: string, message: string): string {
 }
 
 export default router
+rd">
+    <div class="icon">🚫</div>
+    <h1>${message}</h1>
+    <p>כדי להשתמש בשירות WhatsApp, יש להירשם תחילה.</p>
+    <a class="cta" href="https://hub.jumpstart.co.il">הרשם לשירות</a>
+  </div>
+</body>
+</html>`
+}
+
+export default router
+lt router
