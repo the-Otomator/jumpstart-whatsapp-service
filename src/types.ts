@@ -171,3 +171,5 @@ export interface GroupParticipantsUpdateWebhook {
   by: string | null
   bot_removed: boolean
 }
+
+export interface GroupMemberAddModeRequest { mode: 'admins' | 'all' }

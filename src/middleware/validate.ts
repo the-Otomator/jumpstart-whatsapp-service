@@ -214,3 +214,5 @@ export const groupEditInfoPermissionSchema = z.object({
 export const groupApprovalModeSchema = z.object({
   enabled: z.boolean(),
 })
+
+export const groupMemberAddModeSchema = z.object({ mode: z.enum(['admins', 'all']) })
