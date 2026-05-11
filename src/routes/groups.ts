@@ -13,6 +13,7 @@ import {
   groupSendPermissionSchema,
   groupEditInfoPermissionSchema,
   groupApprovalModeSchema,
+  groupMemberAddModeSchema,
 } from '../middleware/validate'
 import { toJid, jidToPhone } from '../lib/phone'
 import { orgLogger } from '../lib/logger'
@@ -28,6 +29,7 @@ import type {
   GroupSendPermissionRequest,
   GroupEditInfoPermissionRequest,
   GroupApprovalModeRequest,
+  GroupMemberAddModeRequest,
 } from '../types'
 
 const router = Router()
@@ -486,6 +488,31 @@ router.post(
     } catch (err) {
       log.error({ groupJid, err: (err as Error).message }, 'Failed to update group approval mode')
       res.status(500).json({ error: (err as Error).message, code: 'GROUP_APPROVAL_MODE_FAILED' })
+    }
+  }
+)
+
+// ── POST /api/groups/:orgId/:groupJid/member-add-mode ──────────
+router.post(
+  '/:orgId/:groupJid/member-add-mode',
+  validateParams(groupParamsSchema),
+  validateBody(groupMemberAddModeSchema),
+  async (req: Request, res: Response) => {
+    const { orgId, groupJid } = req.params
+    const { mode } = req.body as GroupMemberAddModeRequest
+    const log = orgLogger(orgId)
+
+    const sock = requireSocket(orgId, res)
+    if (!sock) return
+
+    try {
+      const baileysMode = mode === 'admins' ? 'admin_add' : 'all_member_add'
+      await sock.groupMemberAddMode(groupJid, baileysMode)
+      log.info({ groupJid, mode }, 'Group member-add mode updated')
+      res.json({ ok: true })
+    } catch (err) {
+      log.error({ groupJid, err: (err as Error).message }, 'Failed to update group member-add mode')
+      res.status(500).json({ error: (err as Error).message, code: 'GROUP_MEMBER_ADD_MODE_FAILED' })
     }
   }
 )

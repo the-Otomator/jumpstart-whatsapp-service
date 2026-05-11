@@ -124,6 +124,10 @@ export interface GroupApprovalModeRequest {
   enabled: boolean
 }
 
+export interface GroupMemberAddModeRequest {
+  mode: 'admins' | 'all'
+}
+
 export interface GroupParticipantsUpdateWebhook {
   event: 'group_participants_update'
   orgId: string

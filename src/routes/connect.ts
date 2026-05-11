@@ -142,7 +142,8 @@ function renderConnectPage(orgId: string): string {
 
     <div id="state-connecting" class="state">
       <div class="spinner"></div>
-      <p style="color:#888;">Connecting... waiting for authentication</p>
+      <p style="color:#aaa;">מסנכרן עם WhatsApp… נא להמתין</p>
+      <p style="color:#666;font-size:12px;margin-top:8px;" dir="ltr">Syncing with WhatsApp… please wait</p>
     </div>
 
     <div id="state-connected" class="state">
