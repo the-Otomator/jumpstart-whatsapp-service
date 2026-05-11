@@ -517,4 +517,32 @@ router.post(
   }
 )
 
+// ── GET /api/groups/:orgId/invite-info/:inviteCode ────────────────────────────
+// Resolves a WhatsApp invite code to group JID + subject without requiring
+// the bot to be inside the group. Used to register externally-created groups.
+router.get(
+  '/:orgId/invite-info/:inviteCode',
+  validateParams(orgIdParamsSchema),
+  async (req: Request, res: Response) => {
+    const { orgId, inviteCode } = req.params
+    const log = orgLogger(orgId)
+
+    const sock = requireSocket(orgId, res)
+    if (!sock) return
+
+    try {
+      const info = await (sock as any).groupGetInviteInfo(inviteCode)
+      log.info({ inviteCode, groupJid: info?.id }, 'Resolved invite code')
+      res.json({
+        groupJid: info?.id ?? null,
+        subject: info?.subject ?? null,
+        size: info?.size ?? null,
+      })
+    } catch (err) {
+      log.error({ inviteCode, err: (err as Error).message }, 'Failed to resolve invite code')
+      res.status(500).json({ error: (err as Error).message, code: 'INVITE_INFO_FAILED' })
+    }
+  }
+)
+
 export default router
