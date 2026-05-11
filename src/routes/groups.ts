@@ -9,6 +9,7 @@ import {
   groupParticipantsSchema,
   groupSendSchema,
   groupDescriptionSchema,
+  groupSubjectSchema,
   groupIconSchema,
   groupSendPermissionSchema,
   groupEditInfoPermissionSchema,
@@ -25,6 +26,7 @@ import type {
   GroupMetadataParticipant,
   AdminedGroup,
   GroupDescriptionRequest,
+  GroupSubjectRequest,
   GroupIconRequest,
   GroupSendPermissionRequest,
   GroupEditInfoPermissionRequest,
@@ -346,6 +348,51 @@ router.get(
     } catch (err) {
       log.error({ err: (err as Error).message }, 'Failed to list admined groups')
       res.status(500).json({ error: (err as Error).message, code: 'GROUP_LIST_FAILED' })
+    }
+  }
+)
+
+// ── GET /api/groups/:orgId/:groupJid/invite-code ─────────────────────────────
+router.get(
+  '/:orgId/:groupJid/invite-code',
+  validateParams(groupParamsSchema),
+  async (req: Request, res: Response) => {
+    const { orgId, groupJid } = req.params
+    const log = orgLogger(orgId)
+
+    const sock = requireSocket(orgId, res)
+    if (!sock) return
+
+    try {
+      const code = await sock.groupInviteCode(groupJid)
+      res.json({ code, inviteLink: `https://chat.whatsapp.com/${code}` })
+    } catch (err) {
+      log.error({ groupJid, err: (err as Error).message }, 'Failed to fetch group invite code')
+      res.status(500).json({ error: (err as Error).message, code: 'GROUP_INVITE_CODE_FAILED' })
+    }
+  }
+)
+
+// ── POST /api/groups/:orgId/:groupJid/subject ────────────────────────────────
+router.post(
+  '/:orgId/:groupJid/subject',
+  validateParams(groupParamsSchema),
+  validateBody(groupSubjectSchema),
+  async (req: Request, res: Response) => {
+    const { orgId, groupJid } = req.params
+    const { subject } = req.body as GroupSubjectRequest
+    const log = orgLogger(orgId)
+
+    const sock = requireSocket(orgId, res)
+    if (!sock) return
+
+    try {
+      await sock.groupUpdateSubject(groupJid, subject)
+      log.info({ groupJid, subject }, 'Group subject updated')
+      res.json({ ok: true })
+    } catch (err) {
+      log.error({ groupJid, err: (err as Error).message }, 'Failed to update group subject')
+      res.status(500).json({ error: (err as Error).message, code: 'GROUP_SUBJECT_FAILED' })
     }
   }
 )
