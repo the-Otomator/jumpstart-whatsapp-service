@@ -137,3 +137,38 @@ export interface GroupParticipantsUpdateWebhook {
   by: string | null
   bot_removed: boolean
 }
+
+// ── Contact profile types ─────────────────────────────────────────
+
+export interface ContactBusinessProfile {
+  description: string | null
+  category: string | null
+  email: string | null
+  websites: string[]
+  address: string | null
+  business_hours: {
+    timezone?: string
+    schedule?: Array<{
+      day_of_week: string
+      mode: string
+      open_time?: number
+      close_time?: number
+    }>
+  } | null
+}
+
+export interface ContactExistsResponse {
+  success: true
+  phone: string
+  exists_on_whatsapp: boolean
+  jid?: string
+}
+
+export interface ContactProfileResponse {
+  success: true
+  phone: string
+  exists_on_whatsapp: boolean
+  profile_picture_url?: string | null
+  about?: string | null
+  business_profile?: ContactBusinessProfile
+}
