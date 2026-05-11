@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express'
+﻿import { Router, Request, Response } from 'express'
 import { getBaileysSocket, getStatus } from '../sessionManager'
 import {
   validateBody,
@@ -13,6 +13,7 @@ import {
   groupSendPermissionSchema,
   groupEditInfoPermissionSchema,
   groupApprovalModeSchema,
+  groupMemberAddModeSchema,
 } from '../middleware/validate'
 import { toJid, jidToPhone } from '../lib/phone'
 import { orgLogger } from '../lib/logger'
@@ -28,6 +29,7 @@ import type {
   GroupSendPermissionRequest,
   GroupEditInfoPermissionRequest,
   GroupApprovalModeRequest,
+  GroupMemberAddModeRequest,
 } from '../types'
 
 const router = Router()
@@ -47,7 +49,7 @@ function requireSocket(orgId: string, res: Response) {
   return sock
 }
 
-// ── POST /api/groups/:orgId/create ──────────────────────────────
+// ΓöÇΓöÇ POST /api/groups/:orgId/create ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.post(
   '/:orgId/create',
   validateParams(orgIdParamsSchema),
@@ -117,7 +119,7 @@ router.post(
   }
 )
 
-// ── POST /api/groups/:orgId/:groupJid/add ───────────────────────
+// ΓöÇΓöÇ POST /api/groups/:orgId/:groupJid/add ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.post(
   '/:orgId/:groupJid/add',
   validateParams(groupParamsSchema),
@@ -164,7 +166,7 @@ router.post(
   }
 )
 
-// ── POST /api/groups/:orgId/:groupJid/remove ────────────────────
+// ΓöÇΓöÇ POST /api/groups/:orgId/:groupJid/remove ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.post(
   '/:orgId/:groupJid/remove',
   validateParams(groupParamsSchema),
@@ -189,7 +191,7 @@ router.post(
   }
 )
 
-// ── POST /api/groups/:orgId/:groupJid/promote ───────────────────
+// ΓöÇΓöÇ POST /api/groups/:orgId/:groupJid/promote ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.post(
   '/:orgId/:groupJid/promote',
   validateParams(groupParamsSchema),
@@ -214,7 +216,7 @@ router.post(
   }
 )
 
-// ── POST /api/groups/:orgId/:groupJid/demote ────────────────────
+// ΓöÇΓöÇ POST /api/groups/:orgId/:groupJid/demote ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.post(
   '/:orgId/:groupJid/demote',
   validateParams(groupParamsSchema),
@@ -239,7 +241,7 @@ router.post(
   }
 )
 
-// ── POST /api/groups/:orgId/:groupJid/send ──────────────────────
+// ΓöÇΓöÇ POST /api/groups/:orgId/:groupJid/send ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.post(
   '/:orgId/:groupJid/send',
   validateParams(groupParamsSchema),
@@ -273,7 +275,7 @@ router.post(
   }
 )
 
-// ── GET /api/groups/:orgId/:groupJid/metadata ───────────────────
+// ΓöÇΓöÇ GET /api/groups/:orgId/:groupJid/metadata ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.get(
   '/:orgId/:groupJid/metadata',
   validateParams(groupParamsSchema),
@@ -306,7 +308,7 @@ router.get(
   }
 )
 
-// ── GET /api/groups/:orgId/admined ──────────────────────────────
+// ΓöÇΓöÇ GET /api/groups/:orgId/admined ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.get(
   '/:orgId/admined',
   validateParams(orgIdParamsSchema),
@@ -348,7 +350,7 @@ router.get(
   }
 )
 
-// ── POST /api/groups/:orgId/:groupJid/description ───────────────
+// ΓöÇΓöÇ POST /api/groups/:orgId/:groupJid/description ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.post(
   '/:orgId/:groupJid/description',
   validateParams(groupParamsSchema),
@@ -372,7 +374,7 @@ router.post(
   }
 )
 
-// ── POST /api/groups/:orgId/:groupJid/icon ──────────────────────
+// ΓöÇΓöÇ POST /api/groups/:orgId/:groupJid/icon ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.post(
   '/:orgId/:groupJid/icon',
   validateParams(groupParamsSchema),
@@ -416,7 +418,7 @@ router.post(
   }
 )
 
-// ── POST /api/groups/:orgId/:groupJid/send-permission ──────────
+// ΓöÇΓöÇ POST /api/groups/:orgId/:groupJid/send-permission ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.post(
   '/:orgId/:groupJid/send-permission',
   validateParams(groupParamsSchema),
@@ -441,7 +443,7 @@ router.post(
   }
 )
 
-// ── POST /api/groups/:orgId/:groupJid/edit-info-permission ──────
+// ΓöÇΓöÇ POST /api/groups/:orgId/:groupJid/edit-info-permission ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.post(
   '/:orgId/:groupJid/edit-info-permission',
   validateParams(groupParamsSchema),
@@ -466,7 +468,7 @@ router.post(
   }
 )
 
-// ── POST /api/groups/:orgId/:groupJid/approval-mode ─────────────
+// ΓöÇΓöÇ POST /api/groups/:orgId/:groupJid/approval-mode ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.post(
   '/:orgId/:groupJid/approval-mode',
   validateParams(groupParamsSchema),
@@ -486,6 +488,31 @@ router.post(
     } catch (err) {
       log.error({ groupJid, err: (err as Error).message }, 'Failed to update group approval mode')
       res.status(500).json({ error: (err as Error).message, code: 'GROUP_APPROVAL_MODE_FAILED' })
+    }
+  }
+)
+
+// ΓöÇΓöÇ POST /api/groups/:orgId/:groupJid/member-add-mode ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+router.post(
+  '/:orgId/:groupJid/member-add-mode',
+  validateParams(groupParamsSchema),
+  validateBody(groupMemberAddModeSchema),
+  async (req: Request, res: Response) => {
+    const { orgId, groupJid } = req.params
+    const { mode } = req.body as GroupMemberAddModeRequest
+    const log = orgLogger(orgId)
+
+    const sock = requireSocket(orgId, res)
+    if (!sock) return
+
+    try {
+      const baileysMode = mode === 'admins' ? 'admin_add' : 'all_member_add'
+      await sock.groupMemberAddMode(groupJid, baileysMode)
+      log.info({ groupJid, mode }, 'Group member-add mode updated')
+      res.json({ ok: true })
+    } catch (err) {
+      log.error({ groupJid, err: (err as Error).message }, 'Failed to update group member-add mode')
+      res.status(500).json({ error: (err as Error).message, code: 'GROUP_MEMBER_ADD_MODE_FAILED' })
     }
   }
 )
