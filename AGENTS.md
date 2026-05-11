@@ -28,6 +28,8 @@ src/
   routes/
     sessions.ts         — /api/sessions CRUD
     messages.ts         — /api/messages send + send-bulk with media
+    groups.ts           — /api/groups create/add/remove/promote/demote/send/metadata + settings
+    contacts.ts         — /api/contacts/:phone/profile + /exists (Baileys profile lookups, 6h cache)
 ```
 
 ## Key conventions

@@ -12,6 +12,7 @@ import sessionRoutes from './routes/sessions'
 import messageRoutes from './routes/messages'
 import globalmaxRouter from './routes/globalmax'
 import groupRoutes from './routes/groups'
+import contactRoutes from './routes/contacts'
 import connectRoutes from './routes/connect'
 import metaWebhookRoutes from './routes/meta-webhook'
 import { listActiveSessions, restoreSessions } from './sessionManager'
@@ -191,6 +192,7 @@ app.use('/api/sessions', sessionRoutes)
 app.use('/api/messages', messageRoutes)
 app.use('/api/globalmax', authMiddleware, globalmaxRouter)
 app.use('/api/groups', groupRoutes)
+app.use('/api/contacts', contactRoutes)
 
 app.post('/api/intents/invalidate/:orgId', authMiddleware, (req, res) => {
   const { orgId } = req.params
