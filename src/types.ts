@@ -108,6 +108,10 @@ export interface GroupDescriptionRequest {
   description: string
 }
 
+export interface GroupSubjectRequest {
+  subject: string
+}
+
 export interface GroupIconRequest {
   url: string
 }
