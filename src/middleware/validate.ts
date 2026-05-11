@@ -199,6 +199,10 @@ export const groupDescriptionSchema = z.object({
   description: z.string().max(512),
 })
 
+export const groupSubjectSchema = z.object({
+  subject: z.string().min(1).max(25),
+})
+
 export const groupIconSchema = z.object({
   url: z.string().url().startsWith('https', 'Icon URL must use HTTPS'),
 })
