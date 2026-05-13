@@ -177,3 +177,80 @@ export interface GroupParticipantsUpdateWebhook {
 }
 
 export interface GroupMemberAddModeRequest { mode: 'admins' | 'all' }
+
+// ── Meta template management types ──────────────────────────────
+
+/** Per-tenant Meta credentials passed by the caller on each template request. */
+export interface MetaCredentials {
+  accessToken: string
+  wabaId: string
+}
+
+/** Meta template component (management/creation format — different from the sending format above). */
+export interface MetaTemplateComponent {
+  type: 'HEADER' | 'BODY' | 'FOOTER' | 'BUTTONS'
+  format?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT'
+  text?: string
+  buttons?: Array<{
+    type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER'
+    text: string
+    url?: string
+    phone_number?: string
+  }>
+}
+
+export interface TemplateCreateRequest {
+  orgId: string
+  name: string
+  language: string
+  category: 'UTILITY' | 'MARKETING' | 'AUTHENTICATION'
+  components: MetaTemplateComponent[]
+  meta: MetaCredentials
+}
+
+export interface TemplateInfo {
+  name: string
+  status: string
+  category: string
+  language: string
+  id: string
+  components: MetaTemplateComponent[]
+}
+
+// ── Bot types ────────────────────────────────────────────────────────────────
+
+export interface BotProcessRequest {
+  organizationId: string
+  tenantUrl: string
+  tenantServiceKey: string
+  conversationId: string
+  messageId: string
+  messageBody: string
+  contactPhone: string
+  deviceId: string
+  orgIdOnDevice: string
+  systemPrompt?: string
+  maxHistoryMessages?: number
+}
+
+export interface ChatMessage {
+  role: 'user' | 'model'
+  parts: Array<{ text: string }>
+}
+
+export interface BotContext {
+  tenantUrl: string
+  tenantServiceKey: string
+  organizationId: string
+  conversationId: string
+  contactPhone: string
+  deviceId: string
+  orgIdOnDevice: string
+}
+
+export interface BotTool {
+  name: string
+  description: string
+  parameters: object
+  execute: (args: Record<string, unknown>, ctx: BotContext) => Promise<string>
+}
