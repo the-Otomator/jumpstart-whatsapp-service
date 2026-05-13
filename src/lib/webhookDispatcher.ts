@@ -16,6 +16,23 @@ const MAX_FAILURES_STORED = 100
 /** In-memory queue of recent webhook failures (per org) */
 const failureLog: WebhookFailure[] = []
 
+/** Legacy Baileys configs pointed at a non-existent EF; repoint to wa-webhook. */
+export function normalizeJumpstartInboundWebhookUrl(webhookUrl: string): string {
+  if (webhookUrl.includes('whatsapp-incoming')) {
+    return webhookUrl.replace(/whatsapp-incoming/g, 'wa-webhook')
+  }
+  return webhookUrl
+}
+
+function buildWebhookHeaders(url: string, payload: Record<string, unknown>): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const orgId = typeof payload.orgId === 'string' ? payload.orgId : undefined
+  if (orgId && url.includes('/functions/v1/wa-webhook')) {
+    headers['x-wa-session-key'] = orgId
+  }
+  return headers
+}
+
 async function attemptPost(url: string, payload: object, attempt: number): Promise<boolean> {
   try {
     const controller = new AbortController()
@@ -23,7 +40,7 @@ async function attemptPost(url: string, payload: object, attempt: number): Promi
 
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildWebhookHeaders(url, payload as Record<string, unknown>),
       body: JSON.stringify(payload),
       signal: controller.signal,
     })
@@ -45,9 +62,10 @@ async function attemptPost(url: string, payload: object, attempt: number): Promi
 /** Post a webhook with retry logic */
 export async function postWebhook(webhookUrl: string, payload: Record<string, unknown>): Promise<void> {
   const orgId = payload.orgId as string
+  const url = normalizeJumpstartInboundWebhookUrl(webhookUrl)
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const success = await attemptPost(webhookUrl, payload, attempt + 1)
+    const success = await attemptPost(url, payload, attempt + 1)
     if (success) {
       logger.debug({ orgId, event: (payload as Record<string, unknown>).event }, 'Webhook delivered')
       return
@@ -62,7 +80,7 @@ export async function postWebhook(webhookUrl: string, payload: Record<string, un
   // All retries exhausted — log failure
   const failure: WebhookFailure = {
     orgId,
-    url: webhookUrl,
+    url,
     payload,
     attempts: MAX_RETRIES,
     lastError: 'All retry attempts exhausted',
