@@ -15,6 +15,8 @@ import groupRoutes from './routes/groups'
 import contactRoutes from './routes/contacts'
 import connectRoutes from './routes/connect'
 import metaWebhookRoutes from './routes/meta-webhook'
+import metaWebhooksRouter from './routes/webhooks'
+import templatesRouter from './routes/templates'
 import { listActiveSessions, restoreSessions } from './sessionManager'
 import { logger } from './lib/logger'
 import { requestIdMiddleware } from './middleware/requestId'
@@ -115,7 +117,12 @@ app.use(
     },
   })
 )
-app.use(express.json({ limit: '5mb' })) // allow media base64, but cap it
+app.use(express.json({
+  limit: '5mb',
+  verify(req, _res, buf) {
+    (req as any).rawBody = buf
+  },
+}))
 app.use(requestIdMiddleware)
 
 app.use(
@@ -185,6 +192,9 @@ app.use('/connect', connectRoutes)
 // Meta Cloud API webhook (no auth - called by Meta directly)
 app.use('/meta-webhook', metaWebhookRoutes)
 
+// Meta webhook with HMAC signature verification (template status events)
+app.use('/webhooks/meta', metaWebhooksRouter)
+
 // API routes (auth + rate limit)
 app.use('/api', apiLimiter, authMiddleware)
 app.use('/api/sessions', sessionRoutes)
@@ -192,6 +202,7 @@ app.use('/api/messages', messageRoutes)
 app.use('/api/globalmax', authMiddleware, globalmaxRouter)
 app.use('/api/groups', groupRoutes)
 app.use('/api/contacts', contactRoutes)
+app.use('/api/templates', templatesRouter)
 
 // Global error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
