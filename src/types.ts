@@ -216,3 +216,41 @@ export interface TemplateInfo {
   id: string
   components: MetaTemplateComponent[]
 }
+
+// ── Bot types ────────────────────────────────────────────────────────────────
+
+export interface BotProcessRequest {
+  organizationId: string
+  tenantUrl: string
+  tenantServiceKey: string
+  conversationId: string
+  messageId: string
+  messageBody: string
+  contactPhone: string
+  deviceId: string
+  orgIdOnDevice: string
+  systemPrompt?: string
+  maxHistoryMessages?: number
+}
+
+export interface ChatMessage {
+  role: 'user' | 'model'
+  parts: Array<{ text: string }>
+}
+
+export interface BotContext {
+  tenantUrl: string
+  tenantServiceKey: string
+  organizationId: string
+  conversationId: string
+  contactPhone: string
+  deviceId: string
+  orgIdOnDevice: string
+}
+
+export interface BotTool {
+  name: string
+  description: string
+  parameters: object
+  execute: (args: Record<string, unknown>, ctx: BotContext) => Promise<string>
+}

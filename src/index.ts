@@ -17,6 +17,7 @@ import connectRoutes from './routes/connect'
 import metaWebhookRoutes from './routes/meta-webhook'
 import metaWebhooksRouter from './routes/webhooks'
 import templatesRouter from './routes/templates'
+import botRoutes from './routes/bot'
 import { listActiveSessions, restoreSessions } from './sessionManager'
 import { logger } from './lib/logger'
 import { requestIdMiddleware } from './middleware/requestId'
@@ -203,6 +204,7 @@ app.use('/api/globalmax', authMiddleware, globalmaxRouter)
 app.use('/api/groups', groupRoutes)
 app.use('/api/contacts', contactRoutes)
 app.use('/api/templates', templatesRouter)
+app.use('/api/bot', botRoutes)
 
 // Global error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
