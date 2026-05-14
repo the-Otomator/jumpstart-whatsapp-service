@@ -55,7 +55,7 @@ export async function callGemini(
 
   const contents: Content[] = messages.map((m) => ({
     role: m.role,
-    parts: [{ text: m.text }],
+    parts: m.parts,
   }))
 
   let result: GenerateContentResult
