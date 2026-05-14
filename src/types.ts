@@ -7,7 +7,6 @@ export interface Session {
   qr?: string
   phoneNumber?: string
   webhookUrl?: string
-  partnerName?: string
 }
 
 export type MessageType =
@@ -35,17 +34,18 @@ export interface TemplateParameter {
 
 export interface SendMessageRequest {
   orgId: string
-  to: string
+  to: string // phone number with country code, e.g. "972501234567"
   type: MessageType
-  message?: string
-  mediaUrl?: string
-  mediaBase64?: string
-  mimetype?: string
-  filename?: string
-  latitude?: number
+  message?: string // text content or caption for media
+  mediaUrl?: string // URL to download media from
+  mediaBase64?: string // direct base64-encoded media
+  mimetype?: string // e.g. "application/pdf"
+  filename?: string // for documents
+  latitude?: number // for location
   longitude?: number
-  contactName?: string
+  contactName?: string // for contact card
   contactPhone?: string
+  // Template fields (Meta Cloud only)
   template?: {
     name: string
     language: string
@@ -57,4 +57,200 @@ export interface ApiError {
   error: string
   code: string
   details?: unknown
+}
+
+// ── Group types ──────────────────────────────────────────────────
+
+export interface GroupCreateRequest {
+  subject: string
+  participants: string[]  // phone numbers (digits only)
+  iconUrl?: string
+  description?: string
+}
+
+export interface GroupParticipantsRequest {
+  participants: string[]  // phone numbers (digits only)
+}
+
+export interface GroupParticipantResult {
+  phone: string
+  status: string
+  inviteFallback?: string
+}
+
+export interface GroupCreateResponse {
+  groupJid: string
+  inviteLink: string
+  participants: GroupParticipantResult[]
+}
+
+export interface GroupMetadataParticipant {
+  phone: string
+  isAdmin: boolean
+  isSuperAdmin: boolean
+}
+
+export interface GroupMetadataResponse {
+  subject: string
+  description: string | null
+  participants: GroupMetadataParticipant[]
+  owner: string | null
+}
+
+export interface AdminedGroup {
+  groupJid: string
+  subject: string
+  memberCount: number
+  admins: string[]
+}
+
+export interface GroupDescriptionRequest {
+  description: string
+}
+
+export interface GroupSubjectRequest {
+  subject: string
+}
+
+export interface GroupIconRequest {
+  url: string
+}
+
+export interface GroupSendPermissionRequest {
+  mode: 'admins' | 'all'
+}
+
+export interface GroupEditInfoPermissionRequest {
+  mode: 'admins' | 'all'
+}
+
+export interface GroupApprovalModeRequest {
+  enabled: boolean
+}
+
+// ── Contact profile types ───────────────────────────────────────
+
+export interface ContactBusinessHours {
+  /** ISO weekday (1=Mon..7=Sun) → list of {open, close} HH:mm windows */
+  timezone?: string
+  schedule?: Array<{
+    day_of_week: string
+    mode: string
+    open_time?: number
+    close_time?: number
+  }>
+}
+
+export interface ContactBusinessProfile {
+  description?: string | null
+  category?: string | null
+  email?: string | null
+  websites?: string[]
+  address?: string | null
+  business_hours?: ContactBusinessHours | null
+}
+
+export interface ContactProfileResponse {
+  success: true
+  phone: string
+  exists_on_whatsapp: boolean
+  profile_picture_url?: string | null
+  about?: string | null
+  business_profile?: ContactBusinessProfile | null
+}
+
+export interface ContactExistsResponse {
+  success: true
+  phone: string
+  exists_on_whatsapp: boolean
+  jid?: string
+}
+
+export interface GroupParticipantsUpdateWebhook {
+  event: 'group_participants_update'
+  orgId: string
+  groupJid: string
+  action: 'add' | 'remove' | 'promote' | 'demote'
+  participants: string[]
+  by: string | null
+  bot_removed: boolean
+}
+
+export interface GroupMemberAddModeRequest { mode: 'admins' | 'all' }
+
+// ── Meta template management types ──────────────────────────────
+
+/** Per-tenant Meta credentials passed by the caller on each template request. */
+export interface MetaCredentials {
+  accessToken: string
+  wabaId: string
+}
+
+/** Meta template component (management/creation format — different from the sending format above). */
+export interface MetaTemplateComponent {
+  type: 'HEADER' | 'BODY' | 'FOOTER' | 'BUTTONS'
+  format?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT'
+  text?: string
+  buttons?: Array<{
+    type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER'
+    text: string
+    url?: string
+    phone_number?: string
+  }>
+}
+
+export interface TemplateCreateRequest {
+  orgId: string
+  name: string
+  language: string
+  category: 'UTILITY' | 'MARKETING' | 'AUTHENTICATION'
+  components: MetaTemplateComponent[]
+  meta: MetaCredentials
+}
+
+export interface TemplateInfo {
+  name: string
+  status: string
+  category: string
+  language: string
+  id: string
+  components: MetaTemplateComponent[]
+}
+
+// ── Bot types ────────────────────────────────────────────────────────────────
+
+export interface BotProcessRequest {
+  organizationId: string
+  tenantUrl: string
+  tenantServiceKey: string
+  conversationId: string
+  messageId: string
+  messageBody: string
+  contactPhone: string
+  deviceId: string
+  orgIdOnDevice: string
+  systemPrompt?: string
+  maxHistoryMessages?: number
+}
+
+export interface ChatMessage {
+  role: 'user' | 'model'
+  parts: Array<{ text: string }>
+}
+
+export interface BotContext {
+  tenantUrl: string
+  tenantServiceKey: string
+  organizationId: string
+  conversationId: string
+  contactPhone: string
+  deviceId: string
+  orgIdOnDevice: string
+}
+
+export interface BotTool {
+  name: string
+  description: string
+  parameters: object
+  execute: (args: Record<string, unknown>, ctx: BotContext) => Promise<string>
 }

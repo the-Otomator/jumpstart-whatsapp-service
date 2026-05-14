@@ -10,8 +10,14 @@ import { promisify } from 'util'
 import { authMiddleware } from './auth'
 import sessionRoutes from './routes/sessions'
 import messageRoutes from './routes/messages'
+import globalmaxRouter from './routes/globalmax'
+import groupRoutes from './routes/groups'
+import contactRoutes from './routes/contacts'
 import connectRoutes from './routes/connect'
 import metaWebhookRoutes from './routes/meta-webhook'
+import metaWebhooksRouter from './routes/webhooks'
+import templatesRouter from './routes/templates'
+import botRoutes from './routes/bot'
 import { listActiveSessions, restoreSessions } from './sessionManager'
 import { logger } from './lib/logger'
 import { requestIdMiddleware } from './middleware/requestId'
@@ -19,7 +25,7 @@ import { setupGracefulShutdown } from './lib/shutdown'
 
 const execAsync = promisify(exec)
 
-// ── In-memory error log (last 100 errors, used by /health) ────────
+// In-memory error log (last 100 errors, used by /health)
 interface ErrorEntry { time: number; msg: string }
 const recentErrorLog: ErrorEntry[] = []
 export function trackError(msg: string): void {
@@ -27,7 +33,7 @@ export function trackError(msg: string): void {
   if (recentErrorLog.length > 100) recentErrorLog.shift()
 }
 
-// ── Disk stats (Linux df) ─────────────────────────────────────────
+// Disk stats (Linux df)
 interface DiskStats { totalGB: number; usedGB: number; freeGB: number; percentUsed: number }
 async function getDiskStats(): Promise<DiskStats | null> {
   try {
@@ -45,7 +51,7 @@ async function getDiskStats(): Promise<DiskStats | null> {
   }
 }
 
-// ── Validate required environment ────────────────────────────────
+// Validate required environment
 if (!process.env.API_SECRET) {
   logger.fatal('API_SECRET environment variable is required')
   process.exit(1)
@@ -54,26 +60,49 @@ if (!process.env.API_SECRET) {
 const app = express()
 const PORT = process.env.PORT ?? 3001
 
-// ── CORS + iframe embed (same list: fetch /status + <iframe src=/connect/...>) ──
+// CORS + iframe embed (same list: fetch /status + <iframe src=/connect/...>)
+//
+// Wildcard subdomain patterns - these always apply regardless of ALLOWED_ORIGINS.
+// Each regex is tested against the full Origin header value.
+const builtInPatterns: RegExp[] = [
+  /^https:\/\/[a-z0-9-]+\.workmatch\.space$/,   // *.workmatch.space
+  /^https:\/\/[a-z0-9-]+\.otomator\.co\.il$/,    // *.otomator.co.il
+  /^https?:\/\/localhost(:\d+)?$/,                // localhost (any port, http or https)
+]
+
+// Explicit origins from env (exact matches, for non-wildcard domains)
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean)
-const frameAncestors =
-  allowedOrigins.length > 0 ? (["'self'", ...allowedOrigins] as string[]) : (["'self'"] as string[])
+const allowedOriginSet = new Set(allowedOrigins)
+
+// Check whether a given origin is allowed (patterns OR explicit list)
+function isOriginAllowed(origin: string): boolean {
+  if (allowedOriginSet.has(origin)) return true
+  return builtInPatterns.some((re) => re.test(origin))
+}
+
+// frame-ancestors needs explicit entries - keep env origins + wildcard CSP tokens
+const frameAncestors: string[] = [
+  "'self'",
+  '*.workmatch.space',
+  '*.otomator.co.il',
+  ...allowedOrigins,
+]
 
 if (allowedOrigins.length === 0) {
-  logger.warn(
-    'ALLOWED_ORIGINS is empty — browsers will block fetch() to /connect/.../status and iframes from Jumpstart. Set comma-separated origins in .env (e.g. http://localhost:5174,https://hub.example.com).'
+  logger.info(
+    'ALLOWED_ORIGINS is empty - using built-in wildcard patterns only (*.workmatch.space, *.otomator.co.il, localhost).'
   )
 } else {
   logger.info(
     { allowedOriginCount: allowedOrigins.length },
-    'CORS + frame-ancestors enabled for configured frontend origins'
+    'CORS + frame-ancestors enabled for configured + built-in origins'
   )
 }
 
-// ── Security ─────────────────────────────────────────────────────
+// Security
 app.use(
   helmet({
     // Default same-origin blocks cross-origin fetch of /status from Jumpstart even when CORS allows.
@@ -84,17 +113,31 @@ app.use(
         scriptSrc: ["'self'", "'unsafe-inline'"], // connect page
         imgSrc: ["'self'", "data:"], // QR base64
         styleSrc: ["'self'", "'unsafe-inline'"],
-        frameAncestors, // without ALLOWED_ORIGINS only 'self' → iframe embed fails
+        frameAncestors, // without ALLOWED_ORIGINS only 'self' -> iframe embed fails
       },
     },
   })
 )
-app.use(express.json({ limit: '5mb' })) // allow media base64, but cap it
+app.use(express.json({
+  limit: '5mb',
+  verify(req, _res, buf) {
+    (req as any).rawBody = buf
+  },
+}))
 app.use(requestIdMiddleware)
 
-app.use(cors({ origin: allowedOrigins.length > 0 ? allowedOrigins : false }))
+app.use(
+  cors({
+    origin(requestOrigin, callback) {
+      // Allow requests with no Origin header (e.g. server-to-server, curl)
+      if (!requestOrigin) return callback(null, true)
+      if (isOriginAllowed(requestOrigin)) return callback(null, requestOrigin)
+      callback(null, false)
+    },
+  })
+)
 
-// ── Request logging ──────────────────────────────────────────────
+// Request logging
 app.use(
   pinoHttp({
     logger: logger as any,
@@ -105,16 +148,16 @@ app.use(
   })
 )
 
-// ── Rate limiting (per IP, 100 requests/minute) ──────────────────
+// Rate limiting (per IP, 100 requests/minute)
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: 100,
+  limit: 1000,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many requests', code: 'RATE_LIMITED' },
 })
 
-// ── Health check (no auth) ───────────────────────────────────────
+// Health check (no auth)
 app.get('/health', async (_req, res) => {
   const sessionList = listActiveSessions()
   const loadAvg = os.loadavg()
@@ -144,18 +187,26 @@ app.get('/health', async (_req, res) => {
   })
 })
 
-// ── Connect page (no auth — onboarding flow) ────────────────────
+// Connect page (no auth - onboarding flow)
 app.use('/connect', connectRoutes)
 
-// ── Meta Cloud API webhook (no auth — called by Meta directly) ──
+// Meta Cloud API webhook (no auth - called by Meta directly)
 app.use('/meta-webhook', metaWebhookRoutes)
 
-// ── API routes (auth + rate limit) ───────────────────────────────
+// Meta webhook with HMAC signature verification (template status events)
+app.use('/webhooks/meta', metaWebhooksRouter)
+
+// API routes (auth + rate limit)
 app.use('/api', apiLimiter, authMiddleware)
 app.use('/api/sessions', sessionRoutes)
 app.use('/api/messages', messageRoutes)
+app.use('/api/globalmax', authMiddleware, globalmaxRouter)
+app.use('/api/groups', groupRoutes)
+app.use('/api/contacts', contactRoutes)
+app.use('/api/templates', templatesRouter)
+app.use('/api/bot', botRoutes)
 
-// ── Global error handler ─────────────────────────────────────────
+// Global error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logger.error({ err: err.message, stack: err.stack }, 'Unhandled error')
   res.status(500).json({
@@ -164,7 +215,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   })
 })
 
-// ── Start server ─────────────────────────────────────────────────
+// Start server
 const server = app.listen(PORT, async () => {
   logger.info({ port: PORT }, 'WhatsApp service started')
 
@@ -176,5 +227,5 @@ const server = app.listen(PORT, async () => {
   }
 })
 
-// ── Graceful shutdown ────────────────────────────────────────────
+// Graceful shutdown
 setupGracefulShutdown(server)
