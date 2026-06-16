@@ -14,5 +14,10 @@ WORKDIR /app
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY package*.json ./
+# Build-time git provenance (supplied by scripts/deploy.sh; .git is not in the image)
+ARG GIT_SHA=unknown
+ARG GIT_BRANCH=unknown
+ENV GIT_SHA=$GIT_SHA
+ENV GIT_BRANCH=$GIT_BRANCH
 EXPOSE 3001
 CMD ["node", "dist/index.js"]

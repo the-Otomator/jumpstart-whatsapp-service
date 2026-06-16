@@ -170,6 +170,8 @@ app.get('/health', async (_req, res) => {
   res.json({
     status: 'ok',
     version: process.env.npm_package_version ?? '1.0.0',
+    gitSha: process.env.GIT_SHA ?? 'unknown',
+    gitBranch: process.env.GIT_BRANCH ?? 'unknown',
     hostname: os.hostname(),
     sessions: sessionList.length,
     connected: sessionList.filter((s) => s.status === 'connected').length,

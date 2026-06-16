@@ -1,6 +1,10 @@
 services:
   whatsapp-service:
-    build: .
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        GIT_BRANCH: ${GIT_BRANCH:-unknown}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${PORT:-3001}:3001"
