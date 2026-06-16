@@ -13,6 +13,7 @@ import pino from 'pino'
 import type { WhatsAppProvider, SendResult, ProviderType } from '../types'
 import type { Session, SendMessageRequest } from '../../types'
 import { logger, orgLogger } from '../../lib/logger'
+import { updateDeviceStatus } from '../../lib/supabase'
 import { postWebhook, rekeyWebhookFailures } from '../../lib/webhookDispatcher'
 import {
   saveSessionMeta,
@@ -85,6 +86,8 @@ export class BaileysProvider implements WhatsAppProvider {
         session.status = 'qr'
         session.qr = base64
         log.info('QR code generated, waiting for scan')
+        // orgId here is the session_key passed to start() (org_id or "org_id-8char").
+        await updateDeviceStatus(orgId, 'qr')
         if (webhookUrl) await postWebhook(webhookUrl, { event: 'qr', orgId, qr: base64 })
       }
 
@@ -99,6 +102,12 @@ export class BaileysProvider implements WhatsAppProvider {
           lastConnected: new Date().toISOString(),
         })
 
+        // Root-cause fix: write live status to the Hub DB row so every DB-reading
+        // surface (admin, get_org_devices, app send-path probe) sees `connected`
+        // immediately. This also makes the first connected device the de-facto
+        // default sender (probe keys on status === 'connected').
+        await updateDeviceStatus(orgId, 'connected', session.phoneNumber)
+
         if (webhookUrl) {
           await postWebhook(webhookUrl, { event: 'connected', orgId, phone: session.phoneNumber })
         }
@@ -110,6 +119,9 @@ export class BaileysProvider implements WhatsAppProvider {
         session.status = 'disconnected'
 
         log.warn({ statusCode, reason }, 'Session disconnected')
+
+        // Reflect the disconnect in the DB (keep phone_number untouched).
+        await updateDeviceStatus(orgId, 'disconnected')
 
         if (webhookUrl) {
           await postWebhook(webhookUrl, { event: 'disconnected', orgId, reason })
