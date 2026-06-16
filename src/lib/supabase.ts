@@ -122,3 +122,57 @@ export async function validateOrg(orgId: string): Promise<{
     return { valid: true }
   }
 }
+
+type DeviceConnectionStatus = 'connected' | 'disconnected' | 'qr'
+
+/**
+ * Write the live connection status of a session back to the Hub `whatsapp_devices`
+ * row, matched on `session_key` (single-device sessions use session_key = org_id;
+ * multi-device sessions use an "org_id-8char" key — both are stored as session_key).
+ *
+ * This is the source of truth every DB-reading surface relies on (otomator-admin,
+ * get_org_devices RPC, and the app's send-path probe which keys on
+ * status === 'connected'). Writing `connected` here is what makes the first
+ * connected device the de-facto default sender with no manual step.
+ *
+ * Never throws — failures are logged and swallowed so the socket handler is safe.
+ */
+export async function updateDeviceStatus(
+  sessionKey: string,
+  status: DeviceConnectionStatus,
+  phoneNumber?: string | null
+): Promise<void> {
+  if (!supabase) {
+    logger.debug({ sessionKey, status }, 'Supabase not configured — skipping device status write-back')
+    return
+  }
+
+  try {
+    const now = new Date().toISOString()
+    const patch: Record<string, unknown> = {
+      status,
+      updated_at: now,
+    }
+
+    if (status === 'connected') {
+      patch.last_connected_at = now
+      // Only set phone_number when we actually have one — never overwrite with null.
+      if (phoneNumber) patch.phone_number = phoneNumber
+    }
+    // On disconnect: keep phone_number as-is (do not null it).
+
+    const { error } = await supabase
+      .from('whatsapp_devices')
+      .update(patch)
+      .eq('session_key', sessionKey)
+
+    if (error) {
+      logger.warn({ sessionKey, status, err: error.message }, 'Failed to write device status to DB')
+      return
+    }
+
+    logger.debug({ sessionKey, status, phoneNumber: phoneNumber ?? undefined }, 'Device status written to DB')
+  } catch (err) {
+    logger.warn({ sessionKey, status, err }, 'Error writing device status to DB')
+  }
+}

@@ -21,6 +21,6 @@ export async function fetchHistory(
 
   return (data ?? []).map((row) => ({
     role: row.direction === 'in' ? ('user' as const) : ('model' as const),
-    text: row.body ?? '',
+    parts: [{ text: row.body ?? '' }],
   }))
 }
