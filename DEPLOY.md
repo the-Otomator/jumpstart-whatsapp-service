@@ -1,5 +1,34 @@
 # Deployment Guide — jumpstart-whatsapp-service
 
+## Production deploys (Hetzner VPS)
+
+The **only** supported way to deploy to prod is:
+
+```bash
+ssh root@178.104.118.178 "cd /opt/whatsapp-service && bash scripts/deploy.sh"
+```
+
+`scripts/deploy.sh` replaces the old ad-hoc `git pull && docker compose up -d --build`.
+It is deliberately strict so a deploy can never silently skip merged work:
+
+- Forces the `main` branch (`DEPLOY_BRANCH` overrides for emergencies only).
+- `git pull --ff-only` — a diverged checkout (e.g. a stale feature branch) fails
+  loudly instead of no-op'ing.
+- Aborts if local `HEAD` ≠ `origin/main`.
+- Bakes the short git SHA + branch into the image as build args, then verifies the
+  running container's `/health` reports the SHA it just built (otherwise exits non-zero).
+
+### Confirm what's live
+
+```bash
+curl -s https://wa.otomator.pro/health | jq '{gitSha,gitBranch,uptime}'
+```
+
+The `gitSha` / `gitBranch` come from build args set by `scripts/deploy.sh`; if they read
+`unknown`, the image was built outside the deploy script.
+
+---
+
 ## Prerequisites
 - Ubuntu 22.04+ VPS (1GB RAM minimum, 2GB recommended)
 - A domain or subdomain pointing to the VPS (e.g. `wa.yourdomain.com`)
@@ -211,7 +240,7 @@ GET /api/contacts/{phone}/exists?orgId=org_123
 ### Health check (no auth required)
 ```
 GET /health
-→ { "status": "ok", "sessions": 2, "uptime": 3600 }
+→ { "status": "ok", "gitSha": "aa91c33", "gitBranch": "main", "sessions": 2, "uptime": 3600 }
 ```
 
 ---
