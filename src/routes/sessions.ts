@@ -82,6 +82,15 @@ router.post(
     const { webhookUrl, provider: providerType, metaAccessToken, metaPhoneNumberId, metaWabaId } = req.body
     const log = orgLogger(orgId)
 
+    if (providerType === 'meta-cloud') {
+      res.status(410).json({
+        error: 'Meta Cloud is no longer served by this VPS. Use JumpStart Supabase Edge Functions (whatsapp-onboard, wa-webhook, wa-meta-send).',
+        code: 'META_CLOUD_DEPRECATED',
+        docs: 'https://github.com/the-Otomator/jumpstartapp',
+      })
+      return
+    }
+
     const orgCheck = await validateOrg(orgId)
     if (!orgCheck.valid) {
       res.status(403).json({
