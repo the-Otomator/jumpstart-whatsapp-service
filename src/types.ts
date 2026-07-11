@@ -32,10 +32,17 @@ export interface TemplateParameter {
   video?: { link: string }
 }
 
+/** Throttle pool lane — operational (default) or marketing (journeys/bulk). */
+export type MessageLane = 'operational' | 'marketing'
+
 export interface SendMessageRequest {
   orgId: string
   to: string // phone number with country code, e.g. "972501234567"
   type: MessageType
+  /** Pool priority lane. Defaults to operational for backward compatibility. */
+  lane?: MessageLane
+  /** When true with marketing lane, return immediately after enqueue (async send). */
+  enqueue?: boolean
   message?: string // text content or caption for media
   mediaUrl?: string // URL to download media from
   mediaBase64?: string // direct base64-encoded media
@@ -57,6 +64,12 @@ export interface ApiError {
   error: string
   code: string
   details?: unknown
+}
+
+export interface CapacityEstimateRequest {
+  orgId: string
+  recipientCount: number
+  lane?: MessageLane
 }
 
 // ── Group types ──────────────────────────────────────────────────

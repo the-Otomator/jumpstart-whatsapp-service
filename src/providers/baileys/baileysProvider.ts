@@ -15,6 +15,7 @@ import type { Session, SendMessageRequest } from '../../types'
 import { logger, orgLogger } from '../../lib/logger'
 import { updateDeviceStatus } from '../../lib/supabase'
 import { postWebhook, rekeyWebhookFailures } from '../../lib/webhookDispatcher'
+import { getSenderPool } from '../../pool'
 import {
   saveSessionMeta,
   loadSessionMeta,
@@ -108,6 +109,8 @@ export class BaileysProvider implements WhatsAppProvider {
         // default sender (probe keys on status === 'connected').
         await updateDeviceStatus(orgId, 'connected', session.phoneNumber)
 
+        getSenderPool(orgId).onSessionConnected(session.phoneNumber)
+
         if (webhookUrl) {
           await postWebhook(webhookUrl, { event: 'connected', orgId, phone: session.phoneNumber })
         }
@@ -122,6 +125,8 @@ export class BaileysProvider implements WhatsAppProvider {
 
         // Reflect the disconnect in the DB (keep phone_number untouched).
         await updateDeviceStatus(orgId, 'disconnected')
+
+        getSenderPool(orgId).onSessionDisconnected(reason)
 
         if (webhookUrl) {
           await postWebhook(webhookUrl, { event: 'disconnected', orgId, reason })
@@ -198,6 +203,10 @@ export class BaileysProvider implements WhatsAppProvider {
         const to = update.key.remoteJid?.split('@')[0] ?? ''
 
         log.debug({ messageId: update.key.id, status, to }, 'Message status update')
+
+        if (status === 'delivered') {
+          getSenderPool(orgId).onMessageDelivered()
+        }
 
         if (webhookUrl) {
           await postWebhook(webhookUrl, {
