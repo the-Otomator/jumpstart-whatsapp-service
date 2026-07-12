@@ -32,6 +32,8 @@ export const migrateSessionSchema = z.object({
 export const sendMessageSchema = z.object({
   orgId: orgIdSchema,
   to: phoneSchema,
+  lane: z.enum(['operational', 'marketing']).optional().default('operational'),
+  enqueue: z.boolean().optional().default(false),
   type: z.enum(['text', 'image', 'video', 'audio', 'document', 'location', 'contact', 'template']).optional().default('text'),
   message: z.string().max(4096, 'Message too long (max 4096 chars)').optional(),
   mediaUrl: z.string().url('Must be a valid URL').optional(),
@@ -70,6 +72,12 @@ export const sendMessageSchema = z.object({
 )
 
 export const sendBulkSchema = z.array(sendMessageSchema).min(1).max(100)
+
+export const capacityEstimateSchema = z.object({
+  orgId: orgIdSchema,
+  recipientCount: z.number().int().min(0).max(100_000),
+  lane: z.enum(['operational', 'marketing']).optional().default('marketing'),
+})
 
 /** Body for `POST /api/sessions/:orgId/send` (orgId from path). */
 export const sessionPathSendBodySchema = z.object({
