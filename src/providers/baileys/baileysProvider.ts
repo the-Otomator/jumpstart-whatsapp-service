@@ -161,6 +161,87 @@ export class BaileysProvider implements WhatsAppProvider {
           ? msg.key.participant?.split('@')[0] ?? ''
           : from.split('@')[0]
 
+        // LID = WhatsApp privacy id (@lid). Real MSISDN lives on key.senderPn /
+        // participantPn (stanza attrs sender_pn / participant_pn in Baileys 6.7.x).
+        const keyAny = msg.key as typeof msg.key & {
+          senderPn?: string
+          participantPn?: string
+          senderLid?: string
+          remoteJidAlt?: string
+          participantAlt?: string
+        }
+        const isLid = from.endsWith('@lid')
+          || (isGroup
+            ? String(msg.key.participant ?? '').endsWith('@lid')
+            : false)
+
+        if (isLid) {
+          log.debug(
+            { key: msg.key, verifiedBizName: (msg as { verifiedBizName?: string }).verifiedBizName },
+            'inbound key',
+          )
+        }
+
+        const jidToDigits = (v?: string | null): string | null => {
+          if (!v) return null
+          const bare = String(v).split('@')[0].split(':')[0].replace(/[^0-9]/g, '')
+          return bare || null
+        }
+        const pickPnDigits = (...cands: Array<string | null | undefined>): string | null => {
+          for (const c of cands) {
+            if (!c) continue
+            const s = String(c)
+            // Prefer explicit PN JIDs; never treat @lid as a phone.
+            if (s.endsWith('@lid')) continue
+            if (s.includes('@s.whatsapp.net') || !s.includes('@')) {
+              const d = jidToDigits(s)
+              if (d) return d
+            }
+          }
+          return null
+        }
+
+        let senderPn: string | null = pickPnDigits(
+          keyAny.senderPn,
+          keyAny.remoteJidAlt,
+          isGroup ? undefined : (from.endsWith('@s.whatsapp.net') ? from : undefined),
+        )
+        let participantPn: string | null = isGroup
+          ? pickPnDigits(keyAny.participantPn, keyAny.participantAlt, msg.key.participant)
+          : null
+
+        // Fallback: Baileys LID↔PN mapping store (present on some 6.7+/7.x builds).
+        if (isLid && !senderPn && !isGroup) {
+          try {
+            const store = (sock as unknown as {
+              signalRepository?: { lidMapping?: { getPNForLID?: (lid: string) => Promise<string | null> | string | null } }
+            }).signalRepository?.lidMapping
+            const lidJid = from.endsWith('@lid') ? from : (keyAny.senderLid ?? null)
+            if (store?.getPNForLID && lidJid) {
+              const mapped = await Promise.resolve(store.getPNForLID(lidJid))
+              senderPn = pickPnDigits(mapped)
+            }
+          } catch (err) {
+            log.debug({ err: (err as Error).message }, 'lidMapping.getPNForLID failed')
+          }
+        }
+        if (isGroup && isLid && !participantPn) {
+          try {
+            const store = (sock as unknown as {
+              signalRepository?: { lidMapping?: { getPNForLID?: (lid: string) => Promise<string | null> | string | null } }
+            }).signalRepository?.lidMapping
+            const lidJid = String(msg.key.participant ?? '').endsWith('@lid')
+              ? String(msg.key.participant)
+              : null
+            if (store?.getPNForLID && lidJid) {
+              const mapped = await Promise.resolve(store.getPNForLID(lidJid))
+              participantPn = pickPnDigits(mapped)
+            }
+          } catch {
+            // best-effort
+          }
+        }
+
         const textContent = extractTextContent(msg.message)
         const mediaType = detectMediaType(msg.message)
 
@@ -175,16 +256,22 @@ export class BaileysProvider implements WhatsAppProvider {
             ? Number(msg.messageTimestamp)
             : Math.floor(Date.now() / 1000),
           isGroup,
+          senderPn: isGroup ? (participantPn ?? senderPn) : senderPn,
+          isLid,
         }
 
         if (isGroup) {
           payload.groupId = from.split('@')[0]
+          payload.participantPn = participantPn
         }
         if (mediaType) {
           payload.mediaType = mediaType
         }
 
-        log.debug({ from: senderPhone, isGroup, mediaType }, 'Incoming message')
+        log.info(
+          { from: senderPhone, isGroup, isLid, senderPn: payload.senderPn, mediaType },
+          'Incoming message',
+        )
 
         if (webhookUrl) await postWebhook(webhookUrl, payload)
       }
