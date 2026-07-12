@@ -14,6 +14,7 @@ import type { WhatsAppProvider, SendResult, ProviderType } from '../types'
 import type { Session, SendMessageRequest } from '../../types'
 import { logger, orgLogger } from '../../lib/logger'
 import { postWebhook, rekeyWebhookFailures } from '../../lib/webhookDispatcher'
+import { getSenderPool } from '../../pool'
 import {
   saveSessionMeta,
   loadSessionMeta,
@@ -99,6 +100,8 @@ export class BaileysProvider implements WhatsAppProvider {
           lastConnected: new Date().toISOString(),
         })
 
+        getSenderPool(orgId).onSessionConnected(session.phoneNumber)
+
         if (webhookUrl) {
           await postWebhook(webhookUrl, { event: 'connected', orgId, phone: session.phoneNumber })
         }
@@ -110,6 +113,8 @@ export class BaileysProvider implements WhatsAppProvider {
         session.status = 'disconnected'
 
         log.warn({ statusCode, reason }, 'Session disconnected')
+
+        getSenderPool(orgId).onSessionDisconnected(reason)
 
         if (webhookUrl) {
           await postWebhook(webhookUrl, { event: 'disconnected', orgId, reason })
@@ -186,6 +191,10 @@ export class BaileysProvider implements WhatsAppProvider {
         const to = update.key.remoteJid?.split('@')[0] ?? ''
 
         log.debug({ messageId: update.key.id, status, to }, 'Message status update')
+
+        if (status === 'delivered') {
+          getSenderPool(orgId).onMessageDelivered()
+        }
 
         if (webhookUrl) {
           await postWebhook(webhookUrl, {
