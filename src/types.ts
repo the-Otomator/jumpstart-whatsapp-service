@@ -117,6 +117,13 @@ export interface AdminedGroup {
   admins: string[]
 }
 
+export interface ParticipatingGroup {
+  groupJid: string
+  subject: string
+  memberCount: number
+  selfIsAdmin: boolean
+}
+
 export interface GroupDescriptionRequest {
   description: string
 }

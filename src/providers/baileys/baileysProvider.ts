@@ -13,6 +13,7 @@ import pino from 'pino'
 import type { WhatsAppProvider, SendResult, ProviderType } from '../types'
 import type { Session, SendMessageRequest } from '../../types'
 import { logger, orgLogger } from '../../lib/logger'
+import { updateDeviceStatus } from '../../lib/supabase'
 import { postWebhook, rekeyWebhookFailures } from '../../lib/webhookDispatcher'
 import { getSenderPool } from '../../pool'
 import {
@@ -24,6 +25,12 @@ import {
   listStoredSessions,
   migrateSessionAuthDir,
 } from '../../lib/sessionStore'
+import {
+  type ExtendedMessageKey,
+  resolveGroupInbound,
+  jidLocalPart,
+  pickPnDigits,
+} from '../../lib/groupInbound'
 
 const baileysLogger = pino({ level: 'silent' })
 
@@ -86,6 +93,8 @@ export class BaileysProvider implements WhatsAppProvider {
         session.status = 'qr'
         session.qr = base64
         log.info('QR code generated, waiting for scan')
+        // orgId here is the session_key passed to start() (org_id or "org_id-8char").
+        await updateDeviceStatus(orgId, 'qr')
         if (webhookUrl) await postWebhook(webhookUrl, { event: 'qr', orgId, qr: base64 })
       }
 
@@ -100,6 +109,12 @@ export class BaileysProvider implements WhatsAppProvider {
           lastConnected: new Date().toISOString(),
         })
 
+        // Root-cause fix: write live status to the Hub DB row so every DB-reading
+        // surface (admin, get_org_devices, app send-path probe) sees `connected`
+        // immediately. This also makes the first connected device the de-facto
+        // default sender (probe keys on status === 'connected').
+        await updateDeviceStatus(orgId, 'connected', session.phoneNumber)
+
         getSenderPool(orgId).onSessionConnected(session.phoneNumber)
 
         if (webhookUrl) {
@@ -113,6 +128,9 @@ export class BaileysProvider implements WhatsAppProvider {
         session.status = 'disconnected'
 
         log.warn({ statusCode, reason }, 'Session disconnected')
+
+        // Reflect the disconnect in the DB (keep phone_number untouched).
+        await updateDeviceStatus(orgId, 'disconnected')
 
         getSenderPool(orgId).onSessionDisconnected(reason)
 
@@ -144,10 +162,60 @@ export class BaileysProvider implements WhatsAppProvider {
         if (!msg.message || msg.key.fromMe) continue
 
         const from = msg.key.remoteJid ?? ''
-        const isGroup = from.endsWith('@g.us')
+        const keyAny = msg.key as ExtendedMessageKey
+        const { isGroup, groupJid, ambiguous } = resolveGroupInbound(keyAny)
+
+        if (ambiguous) {
+          log.debug({ key: msg.key }, 'group inbound without @g.us jid')
+        }
+
+        const isLid = from.endsWith('@lid')
+          || String(msg.key.participant ?? '').endsWith('@lid')
+
+        let senderPn: string | null = pickPnDigits(
+          keyAny.senderPn,
+          keyAny.remoteJidAlt,
+          isGroup ? undefined : (from.endsWith('@s.whatsapp.net') ? from : undefined),
+        )
+        let participantPn: string | null = isGroup
+          ? pickPnDigits(keyAny.participantPn, keyAny.participantAlt, msg.key.participant)
+          : null
+
+        // Fallback: Baileys LID↔PN mapping store (present on some 6.7+/7.x builds).
+        if (isLid && !senderPn && !isGroup) {
+          try {
+            const store = (sock as unknown as {
+              signalRepository?: { lidMapping?: { getPNForLID?: (lid: string) => Promise<string | null> | string | null } }
+            }).signalRepository?.lidMapping
+            const lidJid = from.endsWith('@lid') ? from : (keyAny.senderLid ?? null)
+            if (store?.getPNForLID && lidJid) {
+              const mapped = await Promise.resolve(store.getPNForLID(lidJid))
+              senderPn = pickPnDigits(mapped)
+            }
+          } catch (err) {
+            log.debug({ err: (err as Error).message }, 'lidMapping.getPNForLID failed')
+          }
+        }
+        if (isGroup && isLid && !participantPn) {
+          try {
+            const store = (sock as unknown as {
+              signalRepository?: { lidMapping?: { getPNForLID?: (lid: string) => Promise<string | null> | string | null } }
+            }).signalRepository?.lidMapping
+            const lidJid = String(msg.key.participant ?? '').endsWith('@lid')
+              ? String(msg.key.participant)
+              : null
+            if (store?.getPNForLID && lidJid) {
+              const mapped = await Promise.resolve(store.getPNForLID(lidJid))
+              participantPn = pickPnDigits(mapped)
+            }
+          } catch {
+            // best-effort
+          }
+        }
+
         const senderPhone = isGroup
-          ? msg.key.participant?.split('@')[0] ?? ''
-          : from.split('@')[0]
+          ? (participantPn ?? jidLocalPart(msg.key.participant ?? ''))
+          : jidLocalPart(from)
 
         const textContent = extractTextContent(msg.message)
         const mediaType = detectMediaType(msg.message)
@@ -163,16 +231,21 @@ export class BaileysProvider implements WhatsAppProvider {
             ? Number(msg.messageTimestamp)
             : Math.floor(Date.now() / 1000),
           isGroup,
+          senderPn: isGroup ? (participantPn ?? senderPn) : senderPn,
         }
 
-        if (isGroup) {
-          payload.groupId = from.split('@')[0]
+        if (isGroup && groupJid) {
+          payload.groupId = jidLocalPart(groupJid)
+          payload.participantPn = participantPn
         }
         if (mediaType) {
           payload.mediaType = mediaType
         }
 
-        log.debug({ from: senderPhone, isGroup, mediaType }, 'Incoming message')
+        log.debug(
+          { from: senderPhone, isGroup, groupJid, senderPn: payload.senderPn, mediaType },
+          'Incoming message',
+        )
 
         if (webhookUrl) await postWebhook(webhookUrl, payload)
       }

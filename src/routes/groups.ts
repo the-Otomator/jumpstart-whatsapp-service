@@ -25,6 +25,7 @@ import type {
   GroupParticipantResult,
   GroupMetadataParticipant,
   AdminedGroup,
+  ParticipatingGroup,
   GroupDescriptionRequest,
   GroupSubjectRequest,
   GroupIconRequest,
@@ -35,6 +36,30 @@ import type {
 } from '../types'
 
 const router = Router()
+
+const PARTICIPATING_CACHE_TTL_MS = 6 * 60 * 60 * 1000
+const participatingCache = new Map<string, { expiresAt: number; data: ParticipatingGroup[] }>()
+
+function participatingCacheKey(orgId: string): string {
+  return orgId
+}
+
+function getParticipatingCached(orgId: string): ParticipatingGroup[] | null {
+  const entry = participatingCache.get(participatingCacheKey(orgId))
+  if (!entry) return null
+  if (Date.now() > entry.expiresAt) {
+    participatingCache.delete(participatingCacheKey(orgId))
+    return null
+  }
+  return entry.data
+}
+
+function setParticipatingCached(orgId: string, data: ParticipatingGroup[]): void {
+  participatingCache.set(participatingCacheKey(orgId), {
+    expiresAt: Date.now() + PARTICIPATING_CACHE_TTL_MS,
+    data,
+  })
+}
 
 /** Resolve and validate a Baileys socket, returning 404/503 if not ready. */
 function requireSocket(orgId: string, res: Response) {
@@ -306,6 +331,50 @@ router.get(
     } catch (err) {
       log.error({ groupJid, err: (err as Error).message }, 'Failed to fetch group metadata')
       res.status(500).json({ error: (err as Error).message, code: 'GROUP_METADATA_FAILED' })
+    }
+  }
+)
+
+// ── GET /api/groups/:orgId/participating ─────────────────────────────────────
+router.get(
+  '/:orgId/participating',
+  validateParams(orgIdParamsSchema),
+  async (req: Request, res: Response) => {
+    const { orgId } = req.params
+    const log = orgLogger(orgId)
+
+    const cached = getParticipatingCached(orgId)
+    if (cached) {
+      res.json({ groups: cached, count: cached.length, cached: true })
+      return
+    }
+
+    const sock = requireSocket(orgId, res)
+    if (!sock) return
+
+    try {
+      const systemJid = sock.user?.id ?? ''
+      const allGroups = await sock.groupFetchAllParticipating()
+
+      const groups: ParticipatingGroup[] = []
+
+      for (const [groupJid, meta] of Object.entries(allGroups)) {
+        const self = meta.participants.find((p: { id: string; admin?: string | null }) => p.id === systemJid)
+        groups.push({
+          groupJid,
+          subject: meta.subject,
+          memberCount: meta.participants.length,
+          selfIsAdmin: Boolean(self?.admin),
+        })
+      }
+
+      groups.sort((a, b) => a.subject.localeCompare(b.subject, 'he'))
+      setParticipatingCached(orgId, groups)
+      log.info({ count: groups.length }, 'Listed participating groups')
+      res.json({ groups, count: groups.length, cached: false })
+    } catch (err) {
+      log.error({ err: (err as Error).message }, 'Failed to list participating groups')
+      res.status(500).json({ error: (err as Error).message, code: 'GROUP_LIST_FAILED' })
     }
   }
 )
