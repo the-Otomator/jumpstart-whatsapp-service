@@ -31,6 +31,7 @@ import {
   jidLocalPart,
   pickPnDigits,
 } from '../../lib/groupInbound'
+import { getCachedSubject, setCachedSubject } from '../../lib/groupSubjectCache'
 
 const baileysLogger = pino({ level: 'silent' })
 
@@ -237,6 +238,19 @@ export class BaileysProvider implements WhatsAppProvider {
         if (isGroup && groupJid) {
           payload.groupId = jidLocalPart(groupJid)
           payload.participantPn = participantPn
+          payload.senderName = msg.pushName ?? null
+
+          let groupSubject = getCachedSubject(groupJid)
+          if (!groupSubject) {
+            try {
+              const metadata = await sock.groupMetadata(groupJid)
+              groupSubject = metadata.subject ?? null
+              if (groupSubject) setCachedSubject(groupJid, groupSubject)
+            } catch (err) {
+              log.debug({ err: (err as Error).message, groupJid }, 'groupMetadata lookup failed')
+            }
+          }
+          if (groupSubject) payload.groupSubject = groupSubject
         }
         if (mediaType) {
           payload.mediaType = mediaType
