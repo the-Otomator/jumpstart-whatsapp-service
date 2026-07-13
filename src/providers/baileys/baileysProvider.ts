@@ -25,6 +25,12 @@ import {
   listStoredSessions,
   migrateSessionAuthDir,
 } from '../../lib/sessionStore'
+import {
+  type ExtendedMessageKey,
+  resolveGroupInbound,
+  jidLocalPart,
+  pickPnDigits,
+} from '../../lib/groupInbound'
 
 const baileysLogger = pino({ level: 'silent' })
 
@@ -156,50 +162,15 @@ export class BaileysProvider implements WhatsAppProvider {
         if (!msg.message || msg.key.fromMe) continue
 
         const from = msg.key.remoteJid ?? ''
-        const isGroup = from.endsWith('@g.us')
-        const senderPhone = isGroup
-          ? msg.key.participant?.split('@')[0] ?? ''
-          : from.split('@')[0]
+        const keyAny = msg.key as ExtendedMessageKey
+        const { isGroup, groupJid, ambiguous } = resolveGroupInbound(keyAny)
 
-        // LID = WhatsApp privacy id (@lid). Real MSISDN lives on key.senderPn /
-        // participantPn (stanza attrs sender_pn / participant_pn in Baileys 6.7.x).
-        const keyAny = msg.key as typeof msg.key & {
-          senderPn?: string
-          participantPn?: string
-          senderLid?: string
-          remoteJidAlt?: string
-          participantAlt?: string
+        if (ambiguous) {
+          log.debug({ key: msg.key }, 'group inbound without @g.us jid')
         }
+
         const isLid = from.endsWith('@lid')
-          || (isGroup
-            ? String(msg.key.participant ?? '').endsWith('@lid')
-            : false)
-
-        if (isLid) {
-          log.debug(
-            { key: msg.key, verifiedBizName: (msg as { verifiedBizName?: string }).verifiedBizName },
-            'inbound key',
-          )
-        }
-
-        const jidToDigits = (v?: string | null): string | null => {
-          if (!v) return null
-          const bare = String(v).split('@')[0].split(':')[0].replace(/[^0-9]/g, '')
-          return bare || null
-        }
-        const pickPnDigits = (...cands: Array<string | null | undefined>): string | null => {
-          for (const c of cands) {
-            if (!c) continue
-            const s = String(c)
-            // Prefer explicit PN JIDs; never treat @lid as a phone.
-            if (s.endsWith('@lid')) continue
-            if (s.includes('@s.whatsapp.net') || !s.includes('@')) {
-              const d = jidToDigits(s)
-              if (d) return d
-            }
-          }
-          return null
-        }
+          || String(msg.key.participant ?? '').endsWith('@lid')
 
         let senderPn: string | null = pickPnDigits(
           keyAny.senderPn,
@@ -242,6 +213,10 @@ export class BaileysProvider implements WhatsAppProvider {
           }
         }
 
+        const senderPhone = isGroup
+          ? (participantPn ?? jidLocalPart(msg.key.participant ?? ''))
+          : jidLocalPart(from)
+
         const textContent = extractTextContent(msg.message)
         const mediaType = detectMediaType(msg.message)
 
@@ -257,19 +232,18 @@ export class BaileysProvider implements WhatsAppProvider {
             : Math.floor(Date.now() / 1000),
           isGroup,
           senderPn: isGroup ? (participantPn ?? senderPn) : senderPn,
-          isLid,
         }
 
-        if (isGroup) {
-          payload.groupId = from.split('@')[0]
+        if (isGroup && groupJid) {
+          payload.groupId = jidLocalPart(groupJid)
           payload.participantPn = participantPn
         }
         if (mediaType) {
           payload.mediaType = mediaType
         }
 
-        log.info(
-          { from: senderPhone, isGroup, isLid, senderPn: payload.senderPn, mediaType },
+        log.debug(
+          { from: senderPhone, isGroup, groupJid, senderPn: payload.senderPn, mediaType },
           'Incoming message',
         )
 
