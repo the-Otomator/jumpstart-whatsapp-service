@@ -14,7 +14,8 @@ import globalmaxRouter from './routes/globalmax'
 import groupRoutes from './routes/groups'
 import contactRoutes from './routes/contacts'
 import connectRoutes from './routes/connect'
-import metaDeprecatedRoutes from './routes/meta-deprecated'
+import metaWebhookRoutes from './routes/meta-webhook'
+import metaWebhooksRouter from './routes/webhooks'
 import templatesRouter from './routes/templates'
 import botRoutes from './routes/bot'
 import { listActiveSessions, restoreSessions } from './sessionManager'
@@ -191,9 +192,11 @@ app.get('/health', async (_req, res) => {
 // Connect page (no auth - onboarding flow)
 app.use('/connect', connectRoutes)
 
-// Meta Cloud API — DEPRECATED (official WhatsApp is on JumpStart Supabase EFs)
-app.use('/meta-webhook', metaDeprecatedRoutes)
-app.use('/webhooks/meta', metaDeprecatedRoutes)
+// Meta Cloud API webhook (no auth - called by Meta directly)
+app.use('/meta-webhook', metaWebhookRoutes)
+
+// Meta webhook with HMAC signature verification (template status events)
+app.use('/webhooks/meta', metaWebhooksRouter)
 
 // API routes (auth + rate limit)
 app.use('/api', apiLimiter, authMiddleware)
@@ -203,7 +206,6 @@ app.use('/api/globalmax', authMiddleware, globalmaxRouter)
 app.use('/api/groups', groupRoutes)
 app.use('/api/contacts', contactRoutes)
 app.use('/api/templates', templatesRouter)
-app.use('/api/meta', metaDeprecatedRoutes)
 app.use('/api/bot', botRoutes)
 
 // Global error handler
