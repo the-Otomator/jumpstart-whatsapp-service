@@ -10,6 +10,8 @@ import { normalizePhone } from '../lib/phone'
 import { orgLogger } from '../lib/logger'
 import type {
   ContactBusinessProfile,
+  ContactCatalog,
+  ContactCatalogProduct,
   ContactExistsResponse,
   ContactProfileResponse,
 } from '../types'
@@ -91,6 +93,36 @@ function mapBusinessProfile(raw: any): ContactBusinessProfile {
     address: raw?.address ?? null,
     business_hours,
   }
+}
+
+/** Map Baileys Product[] → wire catalog (best-effort). */
+function mapCatalog(raw: { products?: any[] } | null | undefined): ContactCatalog | undefined {
+  const products = Array.isArray(raw?.products) ? raw!.products! : []
+  if (products.length === 0) return undefined
+
+  const mapped: ContactCatalogProduct[] = products.map((p: any) => {
+    const imageUrls = p?.imageUrls && typeof p.imageUrls === 'object' ? p.imageUrls : {}
+    const image_url =
+      (typeof imageUrls.requested === 'string' && imageUrls.requested) ||
+      (typeof imageUrls[Object.keys(imageUrls)[0]] === 'string'
+        ? imageUrls[Object.keys(imageUrls)[0]]
+        : undefined) ||
+      undefined
+
+    const product: ContactCatalogProduct = {
+      id: String(p?.id ?? ''),
+      name: String(p?.name ?? ''),
+    }
+    if (typeof p?.price === 'number') product.price = p.price
+    if (typeof p?.currency === 'string') product.currency = p.currency
+    if (typeof p?.description === 'string' && p.description) product.description = p.description
+    if (image_url) product.image_url = image_url
+    if (typeof p?.url === 'string' && p.url) product.url = p.url
+    return product
+  }).filter((p) => p.id && p.name)
+
+  if (mapped.length === 0) return undefined
+  return { products: mapped }
 }
 
 // ── GET /api/contacts/:phone/exists?orgId=... ───────────────────
@@ -181,9 +213,9 @@ router.get(
         return
       }
 
-      // 2. Pull picture / about / business profile in parallel — each is
+      // 2. Pull picture / about / business profile / catalog in parallel — each is
       //    independently optional and a failure on one shouldn't kill the rest.
-      const [pictureUrl, statusList, businessProfile] = await Promise.all([
+      const [pictureUrl, statusList, businessProfile, catalogRaw] = await Promise.all([
         sock.profilePictureUrl(jid, 'image').catch((err: any) => {
           // Baileys throws Boom 404 when the user hides their picture or has none
           const status = err?.output?.statusCode ?? err?.data?.statusCode
@@ -198,6 +230,10 @@ router.get(
         }),
         sock.getBusinessProfile(jid).catch((err: any) => {
           log.debug({ phone: normalized, err: err?.message }, 'getBusinessProfile failed')
+          return undefined
+        }),
+        sock.getCatalog({ jid, limit: 20 }).catch((err: any) => {
+          log.debug({ phone: normalized, err: err?.message }, 'getCatalog failed')
           return undefined
         }),
       ])
@@ -216,6 +252,11 @@ router.get(
 
       if (businessProfile) {
         response.business_profile = mapBusinessProfile(businessProfile)
+      }
+
+      const catalog = mapCatalog(catalogRaw)
+      if (catalog) {
+        response.catalog = catalog
       }
 
       setCached(orgId, normalized, response)
