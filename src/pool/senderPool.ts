@@ -3,6 +3,8 @@ import { orgLogger } from '../lib/logger'
 import { loadSessionMeta } from '../lib/sessionStore'
 import { postWebhook } from '../lib/webhookDispatcher'
 import { sendWhatsAppMessageDirect } from '../lib/sendDirect'
+import { WA_ENQUEUE_CEILING_MS, WA_SEND_TIMEOUT_MS, withTimeout } from '../lib/withTimeout'
+import { getProviderForOrg } from '../providers'
 import type { SendMessageRequest } from '../types'
 import { estimateCapacity } from './capacityPlanner'
 import {
@@ -81,14 +83,37 @@ export class SenderPool {
 
   enqueueAndWait(req: SendMessageRequest, lane: MessageLane = req.lane ?? 'operational'): Promise<string> {
     return new Promise((resolve, reject) => {
+      let settled = false
+      const settleResolve = (id: string) => {
+        if (settled) return
+        settled = true
+        clearTimeout(ceilingTimer)
+        resolve(id)
+      }
+      const settleReject = (err: Error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(ceilingTimer)
+        reject(err)
+      }
+
       const job: QueuedJob = {
         id: randomUUID(),
         req,
         lane,
         enqueuedAt: Date.now(),
-        resolve,
-        reject,
+        resolve: settleResolve,
+        reject: settleReject,
       }
+
+      const ceilingTimer = setTimeout(() => {
+        this.removeQueuedJob(job.id, lane)
+        orgLogger(this.orgId).warn(
+          { jobId: job.id, ceilingMs: WA_ENQUEUE_CEILING_MS },
+          'enqueueAndWait ceiling exceeded — rejecting with send_timeout'
+        )
+        settleReject(new Error('send_timeout'))
+      }, WA_ENQUEUE_CEILING_MS)
 
       if (lane === 'operational') {
         this.operationalQueue.push(job)
@@ -186,11 +211,22 @@ export class SenderPool {
         }
 
         try {
-          const messageId = await sendWhatsAppMessageDirect(job.req)
+          const messageId = await withTimeout(
+            sendWhatsAppMessageDirect(job.req),
+            WA_SEND_TIMEOUT_MS,
+            'send_timeout'
+          )
           this.onSendSuccess(job.lane)
           job.resolve(messageId)
         } catch (err) {
           const msg = (err as Error).message
+          if (msg === 'send_timeout') {
+            orgLogger(this.orgId).warn(
+              { jobId: job.id, to: job.req.to, timeoutMs: WA_SEND_TIMEOUT_MS },
+              'send_timeout — rejecting job and continuing lane worker'
+            )
+            getProviderForOrg(this.orgId)?.onSendTimeout?.(this.orgId)
+          }
           this.onSendFailure(msg)
           job.reject(err as Error)
 
@@ -206,6 +242,12 @@ export class SenderPool {
         this.scheduleProcess()
       }
     }
+  }
+
+  private removeQueuedJob(jobId: string, lane: MessageLane): void {
+    const q = lane === 'operational' ? this.operationalQueue : this.marketingQueue
+    const idx = q.findIndex((j) => j.id === jobId)
+    if (idx >= 0) q.splice(idx, 1)
   }
 
   private requeueFront(job: QueuedJob): void {

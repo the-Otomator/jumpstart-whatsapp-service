@@ -25,6 +25,7 @@ import {
   listStoredSessions,
   migrateSessionAuthDir,
 } from '../../lib/sessionStore'
+import { WA_SEND_TIMEOUT_MS, withTimeout } from '../../lib/withTimeout'
 import {
   type ExtendedMessageKey,
   resolveGroupInbound,
@@ -353,10 +354,62 @@ export class BaileysProvider implements WhatsAppProvider {
     if (!sock) {
       throw new Error(`Session ${req.orgId} not connected`)
     }
+
+    // Liveness guard: status can still say "connected" on a half-open WS.
+    const ws = (sock as { ws?: { readyState?: number } }).ws
+    const WS_OPEN = 1
+    if (!ws || ws.readyState !== WS_OPEN) {
+      const session = this.sessions.get(req.orgId)
+      if (session) session.status = 'disconnected'
+      throw new Error(`Session ${req.orgId} not connected`)
+    }
+
     const jid = formatJid(req.to)
     const content = await buildMessageContent(req)
-    const result = await sock.sendMessage(jid, content)
+    const result = await withTimeout(
+      sock.sendMessage(jid, content) as Promise<{ key?: { id?: string | null } } | undefined>,
+      WA_SEND_TIMEOUT_MS,
+      'send_timeout'
+    )
     return { messageId: result?.key?.id ?? '' }
+  }
+
+  /**
+   * Half-open socket recovery: flip status off "connected", tear down, reconnect.
+   * Called when the pool/provider send ACK times out.
+   */
+  onSendTimeout(orgId: string): void {
+    const log = orgLogger(orgId)
+    const session = this.sessions.get(orgId)
+    if (session) {
+      session.status = 'disconnected'
+    }
+
+    log.warn(
+      { timeoutMs: WA_SEND_TIMEOUT_MS },
+      'send_timeout — session marked disconnected; forcing socket teardown + reconnect'
+    )
+    // Soft-flag Hub status; do not emergency-brake the pool here (lane must keep draining).
+    void updateDeviceStatus(orgId, 'disconnected')
+
+    const sock = this.sockets.get(orgId)
+    const webhookUrl = session?.webhookUrl ?? loadSessionMeta(orgId)?.webhookUrl
+    this.sockets.delete(orgId)
+
+    // Avoid double reconnect if end() still fires connection.close
+    this.intentionallyStoppedOrgIds.add(orgId)
+    try {
+      sock?.end(undefined)
+    } catch {
+      // ignore teardown errors on a dead socket
+    }
+
+    setTimeout(() => {
+      this.intentionallyStoppedOrgIds.delete(orgId)
+      if (!this.sockets.has(orgId)) {
+        void this.start(orgId, webhookUrl)
+      }
+    }, 2000)
   }
 
   /** Expose the raw Baileys socket for group operations (Baileys-only). */
