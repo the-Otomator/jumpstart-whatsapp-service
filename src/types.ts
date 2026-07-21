@@ -117,6 +117,13 @@ export interface AdminedGroup {
   admins: string[]
 }
 
+export interface ParticipatingGroup {
+  groupJid: string
+  subject: string
+  memberCount: number
+  selfIsAdmin: boolean
+}
+
 export interface GroupDescriptionRequest {
   description: string
 }
@@ -163,6 +170,20 @@ export interface ContactBusinessProfile {
   business_hours?: ContactBusinessHours | null
 }
 
+export interface ContactCatalogProduct {
+  id: string
+  name: string
+  price?: number
+  currency?: string
+  description?: string
+  image_url?: string
+  url?: string
+}
+
+export interface ContactCatalog {
+  products: ContactCatalogProduct[]
+}
+
 export interface ContactProfileResponse {
   success: true
   phone: string
@@ -170,6 +191,7 @@ export interface ContactProfileResponse {
   profile_picture_url?: string | null
   about?: string | null
   business_profile?: ContactBusinessProfile | null
+  catalog?: ContactCatalog
 }
 
 export interface ContactExistsResponse {
