@@ -139,10 +139,15 @@ router.post(
       res.json({ success: true, messageId })
     } catch (err) {
       const msg = (err as Error).message
+      const isTimeout = msg === 'send_timeout' || msg.includes('send_timeout')
       const status = msg.includes('not connected') ? 404 : 500
-      const code = msg.includes('not connected') ? 'SESSION_NOT_CONNECTED' : 'SEND_FAILED'
+      const code = msg.includes('not connected')
+        ? 'SESSION_NOT_CONNECTED'
+        : isTimeout
+          ? 'SEND_TIMEOUT'
+          : 'SEND_FAILED'
       log.error({ to, err: msg }, 'Failed to send message (session path)')
-      res.status(status).json({ error: msg, code })
+      res.status(status).json({ error: isTimeout ? 'send_timeout' : msg, code })
     }
   }
 )
