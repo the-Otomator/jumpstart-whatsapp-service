@@ -24,12 +24,35 @@ export function normalizeJumpstartInboundWebhookUrl(webhookUrl: string): string 
   return webhookUrl
 }
 
-function buildWebhookHeaders(url: string, payload: Record<string, unknown>): Record<string, string> {
+/**
+ * Auth expected by Supabase Edge `wa-incoming`:
+ *   `?secret=<WA_INCOMING_SECRET>` OR `Authorization: Bearer <WA_INCOMING_SECRET>`
+ * Some sessions (e.g. WorkMatch) already embed `?secret=` in webhookUrl.
+ * Hub/Otomator sessions that omit it get 401 unless we attach a Bearer from env.
+ *
+ * Env (VPS): WA_INCOMING_SECRET — must match the Edge Function's WA_INCOMING_SECRET / API_SECRET.
+ * Never hardcode secrets here.
+ */
+export function buildWebhookHeaders(url: string, payload: Record<string, unknown>): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const orgId = typeof payload.orgId === 'string' ? payload.orgId : undefined
   if (orgId && url.includes('/functions/v1/wa-webhook')) {
     headers['x-wa-session-key'] = orgId
   }
+
+  if (url.includes('/functions/v1/wa-incoming')) {
+    let hasQuerySecret = false
+    try {
+      hasQuerySecret = new URL(url).searchParams.has('secret')
+    } catch {
+      hasQuerySecret = /[?&]secret=/.test(url)
+    }
+    const secret = process.env.WA_INCOMING_SECRET ?? ''
+    if (!hasQuerySecret && secret) {
+      headers['Authorization'] = `Bearer ${secret}`
+    }
+  }
+
   return headers
 }
 

@@ -36,20 +36,53 @@ import { getCachedSubject, setCachedSubject } from '../../lib/groupSubjectCache'
 
 const baileysLogger = pino({ level: 'silent' })
 
+const WS_OPEN = 1
+const RECONNECT_DELAY_MS = 5000
+const SEND_TIMEOUT_RECONNECT_DELAY_MS = 2000
+/** Proactive half-open probe interval while status says connected. */
+const KEEPALIVE_INTERVAL_MS = Number(process.env.WA_KEEPALIVE_INTERVAL_MS ?? 25_000)
+
+type BaileysSocket = ReturnType<typeof makeWASocket>
+
 export class BaileysProvider implements WhatsAppProvider {
   readonly type: ProviderType = 'baileys'
 
   private sessions = new Map<string, Session>()
-  private sockets = new Map<string, ReturnType<typeof makeWASocket>>()
+  private sockets = new Map<string, BaileysSocket>()
   private intentionallyStoppedOrgIds = new Set<string>()
+  /**
+   * Sockets whose close must not schedule reconnect (replaced by start() restart,
+   * or torn down by forceTeardown). Identity-based so a NEW socket's 'open' cannot
+   * clear the guard before the OLD socket's close fires (the P0b race).
+   */
+  private suppressReconnectSockets = new WeakSet<object>()
+  /** At most one pending reconnect timer per org — prevents restart loops. */
+  private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private keepaliveTimers = new Map<string, ReturnType<typeof setInterval>>()
 
   async start(orgId: string, webhookUrl?: string): Promise<void> {
     const log = orgLogger(orgId)
+
+    // Cancel any pending reconnect before (re)starting — single-timer invariant.
+    this.clearReconnectTimer(orgId)
+    this.stopKeepalive(orgId)
+
+    // Allow a fresh start after stop()/teardown to reconnect on later closes.
     this.intentionallyStoppedOrgIds.delete(orgId)
 
     if (this.sockets.has(orgId)) {
+      // Mark intentional + suppress-by-socket-identity BEFORE end() so connection.close
+      // does not schedule another start(). Shared intentionallyStopped alone races with
+      // the new socket's 'open' clearing the flag; WeakSet keeps the old close suppressed.
       log.info('Restarting existing session')
-      this.sockets.get(orgId)?.end(undefined)
+      const old = this.sockets.get(orgId)
+      this.intentionallyStoppedOrgIds.add(orgId)
+      if (old) this.suppressReconnectSockets.add(old)
+      try {
+        old?.end(undefined)
+      } catch {
+        // ignore teardown errors
+      }
       this.sockets.delete(orgId)
     }
 
@@ -84,6 +117,8 @@ export class BaileysProvider implements WhatsAppProvider {
       logger: baileysLogger,
       printQRInTerminal: false,
       generateHighQualityLinkPreview: false,
+      // Baileys WS ping; our keepalive still probes readyState for silent half-open.
+      keepAliveIntervalMs: 15_000,
     })
     this.sockets.set(orgId, sock)
 
@@ -101,6 +136,9 @@ export class BaileysProvider implements WhatsAppProvider {
       }
 
       if (connection === 'open') {
+        // Fresh live socket — clear stop flag so future unintentional closes reconnect.
+        // Old replaced socket remains suppressed via suppressReconnectSockets.
+        this.intentionallyStoppedOrgIds.delete(orgId)
         session.status = 'connected'
         session.phoneNumber = sock.user?.id?.split(':')[0]
         session.qr = undefined
@@ -119,6 +157,8 @@ export class BaileysProvider implements WhatsAppProvider {
 
         getSenderPool(orgId).onSessionConnected(session.phoneNumber)
 
+        this.startKeepalive(orgId)
+
         if (webhookUrl) {
           await postWebhook(webhookUrl, { event: 'connected', orgId, phone: session.phoneNumber })
         }
@@ -128,6 +168,7 @@ export class BaileysProvider implements WhatsAppProvider {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
         const reason = DisconnectReason[statusCode as number] ?? `unknown (${statusCode})`
         session.status = 'disconnected'
+        this.stopKeepalive(orgId)
 
         log.warn({ statusCode, reason }, 'Session disconnected')
 
@@ -140,19 +181,34 @@ export class BaileysProvider implements WhatsAppProvider {
           await postWebhook(webhookUrl, { event: 'disconnected', orgId, reason })
         }
 
+        // Only drop the map entry if it still points at this closing socket
+        // (a restart may already have installed a newer one).
+        if (this.sockets.get(orgId) === sock) {
+          this.sockets.delete(orgId)
+        }
+
+        if (this.suppressReconnectSockets.has(sock)) {
+          this.intentionallyStoppedOrgIds.delete(orgId)
+          log.info('Suppressed close (socket replaced/torn down) — not scheduling reconnect')
+          return
+        }
+
         if (this.intentionallyStoppedOrgIds.has(orgId)) {
           this.intentionallyStoppedOrgIds.delete(orgId)
           log.info('Intentional stop — not scheduling reconnect')
-          this.sockets.delete(orgId)
           return
         }
 
         if (statusCode !== DisconnectReason.loggedOut) {
+          // Guard: never schedule while a newer socket already exists / is connecting.
+          if (this.sockets.has(orgId)) {
+            log.info('Socket already present — skipping reconnect schedule')
+            return
+          }
           log.info('Reconnecting in 5 seconds...')
-          setTimeout(() => this.start(orgId, webhookUrl), 5000)
+          this.scheduleReconnect(orgId, webhookUrl, RECONNECT_DELAY_MS)
         } else {
           log.info('Logged out — not reconnecting')
-          this.sockets.delete(orgId)
         }
       }
     })
@@ -325,8 +381,12 @@ export class BaileysProvider implements WhatsAppProvider {
     const keepAuth = options?.keepAuthFiles === true
     const purgeAuth = options?.purgeAuthDir === true
     const log = orgLogger(orgId)
+    this.clearReconnectTimer(orgId)
+    this.stopKeepalive(orgId)
     this.intentionallyStoppedOrgIds.add(orgId)
-    this.sockets.get(orgId)?.end(undefined)
+    const sock = this.sockets.get(orgId)
+    if (sock) this.suppressReconnectSockets.add(sock)
+    sock?.end(undefined)
     this.sockets.delete(orgId)
     this.sessions.delete(orgId)
     if (purgeAuth) {
@@ -357,10 +417,9 @@ export class BaileysProvider implements WhatsAppProvider {
 
     // Liveness guard: status can still say "connected" on a half-open WS.
     const ws = (sock as { ws?: { readyState?: number } }).ws
-    const WS_OPEN = 1
     if (!ws || ws.readyState !== WS_OPEN) {
-      const session = this.sessions.get(req.orgId)
-      if (session) session.status = 'disconnected'
+      // Tear down + schedule reconnect (same path as send_timeout); still fail this send fast.
+      this.forceTeardownAndReconnect(req.orgId, 'half_open_readyState')
       throw new Error(`Session ${req.orgId} not connected`)
     }
 
@@ -379,41 +438,11 @@ export class BaileysProvider implements WhatsAppProvider {
    * Called when the pool/provider send ACK times out.
    */
   onSendTimeout(orgId: string): void {
-    const log = orgLogger(orgId)
-    const session = this.sessions.get(orgId)
-    if (session) {
-      session.status = 'disconnected'
-    }
-
-    log.warn(
-      { timeoutMs: WA_SEND_TIMEOUT_MS },
-      'send_timeout — session marked disconnected; forcing socket teardown + reconnect'
-    )
-    // Soft-flag Hub status; do not emergency-brake the pool here (lane must keep draining).
-    void updateDeviceStatus(orgId, 'disconnected')
-
-    const sock = this.sockets.get(orgId)
-    const webhookUrl = session?.webhookUrl ?? loadSessionMeta(orgId)?.webhookUrl
-    this.sockets.delete(orgId)
-
-    // Avoid double reconnect if end() still fires connection.close
-    this.intentionallyStoppedOrgIds.add(orgId)
-    try {
-      sock?.end(undefined)
-    } catch {
-      // ignore teardown errors on a dead socket
-    }
-
-    setTimeout(() => {
-      this.intentionallyStoppedOrgIds.delete(orgId)
-      if (!this.sockets.has(orgId)) {
-        void this.start(orgId, webhookUrl)
-      }
-    }, 2000)
+    this.forceTeardownAndReconnect(orgId, 'send_timeout')
   }
 
   /** Expose the raw Baileys socket for group operations (Baileys-only). */
-  getSocket(orgId: string): ReturnType<typeof makeWASocket> | undefined {
+  getSocket(orgId: string): BaileysSocket | undefined {
     return this.sockets.get(orgId)
   }
 
@@ -467,6 +496,119 @@ export class BaileysProvider implements WhatsAppProvider {
     await this.start(toOrgId, webhookUrl)
 
     orgLogger(toOrgId).info({ fromOrgId }, 'Session migrate complete — connected under new org')
+  }
+
+  // ── Recovery / reconnect helpers (exported for regression tests via casting) ──
+
+  /** @internal — test/inspection: pending reconnect timers */
+  getPendingReconnectCount(): number {
+    return this.reconnectTimers.size
+  }
+
+  /** @internal */
+  hasPendingReconnect(orgId: string): boolean {
+    return this.reconnectTimers.has(orgId)
+  }
+
+  /** @internal */
+  getSocketMapSize(): number {
+    return this.sockets.size
+  }
+
+  clearReconnectTimer(orgId: string): void {
+    const existing = this.reconnectTimers.get(orgId)
+    if (existing) {
+      clearTimeout(existing)
+      this.reconnectTimers.delete(orgId)
+    }
+  }
+
+  /**
+   * Schedule exactly one reconnect for orgId. Replaces any prior timer.
+   * Skips start if a socket already exists when the timer fires.
+   */
+  scheduleReconnect(orgId: string, webhookUrl: string | undefined, delayMs: number): void {
+    this.clearReconnectTimer(orgId)
+    if (this.sockets.has(orgId)) {
+      orgLogger(orgId).info('Skipping reconnect schedule — socket already present')
+      return
+    }
+    const timer = setTimeout(() => {
+      this.reconnectTimers.delete(orgId)
+      if (this.sockets.has(orgId)) {
+        orgLogger(orgId).info('Reconnect timer fired but socket already present — skip')
+        return
+      }
+      void this.start(orgId, webhookUrl)
+    }, delayMs)
+    this.reconnectTimers.set(orgId, timer)
+  }
+
+  /**
+   * Shared teardown+reconnect used by send_timeout, half-open readyState, and keepalive.
+   */
+  forceTeardownAndReconnect(orgId: string, reason: string): void {
+    const log = orgLogger(orgId)
+    const session = this.sessions.get(orgId)
+    if (session) {
+      session.status = 'disconnected'
+    }
+    this.stopKeepalive(orgId)
+
+    log.warn(
+      { reason, timeoutMs: WA_SEND_TIMEOUT_MS },
+      'forcing socket teardown + reconnect'
+    )
+    void updateDeviceStatus(orgId, 'disconnected')
+
+    const sock = this.sockets.get(orgId)
+    const webhookUrl = session?.webhookUrl ?? loadSessionMeta(orgId)?.webhookUrl
+    this.sockets.delete(orgId)
+
+    // Suppress close-driven reconnect; we schedule exactly one via reconnectTimers.
+    if (sock) this.suppressReconnectSockets.add(sock)
+    this.intentionallyStoppedOrgIds.add(orgId)
+    try {
+      sock?.end(undefined)
+    } catch {
+      // ignore teardown errors on a dead socket
+    }
+
+    // Clear stop flag so the scheduled start()'s future closes can reconnect.
+    this.intentionallyStoppedOrgIds.delete(orgId)
+    this.scheduleReconnect(orgId, webhookUrl, SEND_TIMEOUT_RECONNECT_DELAY_MS)
+  }
+
+  private startKeepalive(orgId: string): void {
+    this.stopKeepalive(orgId)
+    const timer = setInterval(() => {
+      const session = this.sessions.get(orgId)
+      if (!session || session.status !== 'connected') return
+      const sock = this.sockets.get(orgId)
+      if (!sock) {
+        this.forceTeardownAndReconnect(orgId, 'keepalive_missing_socket')
+        return
+      }
+      const ws = (sock as { ws?: { readyState?: number } }).ws
+      if (!ws || ws.readyState !== WS_OPEN) {
+        orgLogger(orgId).warn(
+          { readyState: ws?.readyState },
+          'keepalive detected half-open socket — recovering'
+        )
+        this.forceTeardownAndReconnect(orgId, 'keepalive_half_open')
+      }
+    }, KEEPALIVE_INTERVAL_MS)
+    // Don't keep the process alive solely for probes.
+    if (typeof timer.unref === 'function') timer.unref()
+    this.keepaliveTimers.set(orgId, timer)
+  }
+
+  private stopKeepalive(orgId: string): void {
+    const timer = this.keepaliveTimers.get(orgId)
+    if (timer) {
+      clearInterval(timer)
+      this.keepaliveTimers.delete(orgId)
+    }
   }
 }
 
