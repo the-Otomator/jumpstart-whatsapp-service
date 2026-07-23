@@ -7,7 +7,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "test": "npx ts-node --transpile-only src/lib/withTimeout.test.ts && npx ts-node --transpile-only src/pool/senderPool.resume.test.ts && npx ts-node --transpile-only src/providers/baileys/baileysProvider.restart.test.ts && npx ts-node --transpile-only src/lib/webhookDispatcher.test.ts"
+    "test": "npx ts-node --transpile-only src/lib/withTimeout.test.ts && npx ts-node --transpile-only src/pool/senderPool.resume.test.ts && npx ts-node --transpile-only src/providers/baileys/baileysProvider.restart.test.ts && npx ts-node --transpile-only src/providers/baileys/baileysProvider.wsOpen.test.ts && npx ts-node --transpile-only src/lib/webhookDispatcher.test.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

@@ -41,8 +41,25 @@ const RECONNECT_DELAY_MS = 5000
 const SEND_TIMEOUT_RECONNECT_DELAY_MS = 2000
 /** Proactive half-open probe interval while status says connected. */
 const KEEPALIVE_INTERVAL_MS = Number(process.env.WA_KEEPALIVE_INTERVAL_MS ?? 25_000)
+/** Consecutive failed keepalive probes before teardown (transient half-open churn guard). */
+const KEEPALIVE_MISS_THRESHOLD = 2
 
 type BaileysSocket = ReturnType<typeof makeWASocket>
+
+/**
+ * Baileys 6.7+ wraps the raw `ws` in WebSocketClient: no `.readyState` on `sock.ws`,
+ * use `sock.ws.isOpen` (or `sock.ws.socket.readyState`). Legacy/raw sockets still expose readyState.
+ */
+export function isSocketOpen(sock: BaileysSocket | undefined): boolean {
+  if (!sock) return false
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Baileys WebSocketClient; socket is protected
+  const ws = (sock as any).ws as
+    | { isOpen?: boolean; socket?: { readyState?: number }; readyState?: number }
+    | undefined
+  if (ws && typeof ws.isOpen === 'boolean') return ws.isOpen
+  const raw = ws?.socket ?? ws
+  return raw?.readyState === WS_OPEN
+}
 
 export class BaileysProvider implements WhatsAppProvider {
   readonly type: ProviderType = 'baileys'
@@ -59,6 +76,8 @@ export class BaileysProvider implements WhatsAppProvider {
   /** At most one pending reconnect timer per org — prevents restart loops. */
   private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private keepaliveTimers = new Map<string, ReturnType<typeof setInterval>>()
+  /** Consecutive half-open keepalive misses per org; reset on a successful open probe. */
+  private keepaliveMisses = new Map<string, number>()
 
   async start(orgId: string, webhookUrl?: string): Promise<void> {
     const log = orgLogger(orgId)
@@ -416,8 +435,7 @@ export class BaileysProvider implements WhatsAppProvider {
     }
 
     // Liveness guard: status can still say "connected" on a half-open WS.
-    const ws = (sock as { ws?: { readyState?: number } }).ws
-    if (!ws || ws.readyState !== WS_OPEN) {
+    if (!isSocketOpen(sock)) {
       // Tear down + schedule reconnect (same path as send_timeout); still fail this send fast.
       this.forceTeardownAndReconnect(req.orgId, 'half_open_readyState')
       throw new Error(`Session ${req.orgId} not connected`)
@@ -581,26 +599,47 @@ export class BaileysProvider implements WhatsAppProvider {
 
   private startKeepalive(orgId: string): void {
     this.stopKeepalive(orgId)
+    this.keepaliveMisses.set(orgId, 0)
     const timer = setInterval(() => {
-      const session = this.sessions.get(orgId)
-      if (!session || session.status !== 'connected') return
-      const sock = this.sockets.get(orgId)
-      if (!sock) {
-        this.forceTeardownAndReconnect(orgId, 'keepalive_missing_socket')
-        return
-      }
-      const ws = (sock as { ws?: { readyState?: number } }).ws
-      if (!ws || ws.readyState !== WS_OPEN) {
-        orgLogger(orgId).warn(
-          { readyState: ws?.readyState },
-          'keepalive detected half-open socket — recovering'
-        )
-        this.forceTeardownAndReconnect(orgId, 'keepalive_half_open')
-      }
+      this.probeKeepalive(orgId)
     }, KEEPALIVE_INTERVAL_MS)
     // Don't keep the process alive solely for probes.
     if (typeof timer.unref === 'function') timer.unref()
     this.keepaliveTimers.set(orgId, timer)
+  }
+
+  /** Exposed for tests: one keepalive probe tick. */
+  probeKeepalive(orgId: string): void {
+    const session = this.sessions.get(orgId)
+    if (!session || session.status !== 'connected') return
+    const sock = this.sockets.get(orgId)
+    if (!sock) {
+      this.forceTeardownAndReconnect(orgId, 'keepalive_missing_socket')
+      return
+    }
+    if (isSocketOpen(sock)) {
+      this.keepaliveMisses.set(orgId, 0)
+      return
+    }
+    const misses = (this.keepaliveMisses.get(orgId) ?? 0) + 1
+    this.keepaliveMisses.set(orgId, misses)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Baileys WebSocketClient; socket is protected
+    const ws = (sock as any).ws as
+      | { isOpen?: boolean; socket?: { readyState?: number }; readyState?: number }
+      | undefined
+    const readyState = ws?.socket?.readyState ?? ws?.readyState
+    if (misses < KEEPALIVE_MISS_THRESHOLD) {
+      orgLogger(orgId).warn(
+        { misses, readyState, isOpen: ws?.isOpen },
+        'keepalive half-open probe miss — waiting for consecutive failure'
+      )
+      return
+    }
+    orgLogger(orgId).warn(
+      { misses, readyState, isOpen: ws?.isOpen },
+      'keepalive detected half-open socket — recovering'
+    )
+    this.forceTeardownAndReconnect(orgId, 'keepalive_half_open')
   }
 
   private stopKeepalive(orgId: string): void {
@@ -609,6 +648,7 @@ export class BaileysProvider implements WhatsAppProvider {
       clearInterval(timer)
       this.keepaliveTimers.delete(orgId)
     }
+    this.keepaliveMisses.delete(orgId)
   }
 }
 
