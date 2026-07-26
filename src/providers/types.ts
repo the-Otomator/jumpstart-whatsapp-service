@@ -29,6 +29,12 @@ export interface WhatsAppProvider {
   /** Send a message. */
   sendMessage(req: SendMessageRequest): Promise<SendResult>
 
+  /**
+   * Optional: mark session unhealthy and recover after a send ACK timeout
+   * (half-open socket). Baileys implements this; Meta Cloud does not need it.
+   */
+  onSendTimeout?(orgId: string): void
+
   /** List all active sessions managed by this provider. */
   listActiveSessions(): Session[]
 

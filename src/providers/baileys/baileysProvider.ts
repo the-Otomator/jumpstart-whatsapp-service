@@ -27,10 +27,28 @@ import {
   listStoredSessions,
   migrateSessionAuthDir,
 } from '../../lib/sessionStore'
+import { WA_SEND_TIMEOUT_MS, withTimeout } from '../../lib/withTimeout'
+import {
+  type ExtendedMessageKey,
+  resolveGroupInbound,
+  jidLocalPart,
+  pickPnDigits,
+} from '../../lib/groupInbound'
+import { getCachedSubject, setCachedSubject } from '../../lib/groupSubjectCache'
+import {
+  DEFAULT_BACKFILL_AGE_LIMIT_SECONDS,
+  evaluateBackfill,
+} from '../../lib/backfillGuard'
 
 const baileysLogger = pino({ level: 'silent' })
 
 const WS_OPEN = 1
+const RECONNECT_DELAY_MS = 5000
+const SEND_TIMEOUT_RECONNECT_DELAY_MS = 2000
+/** Proactive half-open probe interval while status says connected. */
+const KEEPALIVE_INTERVAL_MS = Number(process.env.WA_KEEPALIVE_INTERVAL_MS ?? 25_000)
+/** Consecutive failed keepalive probes before teardown (transient half-open churn guard). */
+const KEEPALIVE_MISS_THRESHOLD = 2
 
 type BaileysSocket = ReturnType<typeof makeWASocket>
 
@@ -55,14 +73,43 @@ export class BaileysProvider implements WhatsAppProvider {
   private sessions = new Map<string, Session>()
   private sockets = new Map<string, BaileysSocket>()
   private intentionallyStoppedOrgIds = new Set<string>()
+  /**
+   * Sockets whose close must not schedule reconnect (replaced by start() restart,
+   * or torn down by forceTeardown). Identity-based so a NEW socket's 'open' cannot
+   * clear the guard before the OLD socket's close fires (the P0b race).
+   */
+  private suppressReconnectSockets = new WeakSet<object>()
+  /** At most one pending reconnect timer per org — prevents restart loops. */
+  private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private keepaliveTimers = new Map<string, ReturnType<typeof setInterval>>()
+  /** Consecutive half-open keepalive misses per org; reset on a successful open probe. */
+  private keepaliveMisses = new Map<string, number>()
+  /** Wall-clock ms when connection.update → open last fired (reconnect backfill window). */
+  private lastOpenAtMs = new Map<string, number>()
 
   async start(orgId: string, webhookUrl?: string): Promise<void> {
     const log = orgLogger(orgId)
+
+    // Cancel any pending reconnect before (re)starting — single-timer invariant.
+    this.clearReconnectTimer(orgId)
+    this.stopKeepalive(orgId)
+
+    // Allow a fresh start after stop()/teardown to reconnect on later closes.
     this.intentionallyStoppedOrgIds.delete(orgId)
 
     if (this.sockets.has(orgId)) {
+      // Mark intentional + suppress-by-socket-identity BEFORE end() so connection.close
+      // does not schedule another start(). Shared intentionallyStopped alone races with
+      // the new socket's 'open' clearing the flag; WeakSet keeps the old close suppressed.
       log.info('Restarting existing session')
-      this.sockets.get(orgId)?.end(undefined)
+      const old = this.sockets.get(orgId)
+      this.intentionallyStoppedOrgIds.add(orgId)
+      if (old) this.suppressReconnectSockets.add(old)
+      try {
+        old?.end(undefined)
+      } catch {
+        // ignore teardown errors
+      }
       this.sockets.delete(orgId)
     }
 
@@ -97,6 +144,8 @@ export class BaileysProvider implements WhatsAppProvider {
       logger: baileysLogger,
       printQRInTerminal: false,
       generateHighQualityLinkPreview: false,
+      // Baileys WS ping; our keepalive still probes readyState for silent half-open.
+      keepAliveIntervalMs: 15_000,
     })
     this.sockets.set(orgId, sock)
 
@@ -115,6 +164,10 @@ export class BaileysProvider implements WhatsAppProvider {
       }
 
       if (connection === 'open') {
+        // Fresh live socket — clear stop flag so future unintentional closes reconnect.
+        // Old replaced socket remains suppressed via suppressReconnectSockets.
+        this.intentionallyStoppedOrgIds.delete(orgId)
+        this.lastOpenAtMs.set(orgId, Date.now())
         session.status = 'connected'
         session.phoneNumber = sock.user?.id?.split(':')[0]
         session.qr = undefined
@@ -134,6 +187,8 @@ export class BaileysProvider implements WhatsAppProvider {
 
         getSenderPool(orgId).onSessionConnected(session.phoneNumber)
 
+        this.startKeepalive(orgId)
+
         if (webhookUrl) {
           await postWebhook(webhookUrl, { event: 'connected', orgId, phone: session.phoneNumber })
         }
@@ -143,6 +198,7 @@ export class BaileysProvider implements WhatsAppProvider {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
         const reason = formatDisconnectReason(lastDisconnect)
         session.status = 'disconnected'
+        this.stopKeepalive(orgId)
 
         log.warn({ statusCode, reason }, 'Session disconnected')
 
@@ -156,19 +212,34 @@ export class BaileysProvider implements WhatsAppProvider {
           await postWebhook(webhookUrl, { event: 'disconnected', orgId, reason })
         }
 
+        // Only drop the map entry if it still points at this closing socket
+        // (a restart may already have installed a newer one).
+        if (this.sockets.get(orgId) === sock) {
+          this.sockets.delete(orgId)
+        }
+
+        if (this.suppressReconnectSockets.has(sock)) {
+          this.intentionallyStoppedOrgIds.delete(orgId)
+          log.info('Suppressed close (socket replaced/torn down) — not scheduling reconnect')
+          return
+        }
+
         if (this.intentionallyStoppedOrgIds.has(orgId)) {
           this.intentionallyStoppedOrgIds.delete(orgId)
           log.info('Intentional stop — not scheduling reconnect')
-          this.sockets.delete(orgId)
           return
         }
 
         if (statusCode !== DisconnectReason.loggedOut) {
+          // Guard: never schedule while a newer socket already exists / is connecting.
+          if (this.sockets.has(orgId)) {
+            log.info('Socket already present — skipping reconnect schedule')
+            return
+          }
           log.info('Reconnecting in 5 seconds...')
-          setTimeout(() => this.start(orgId, webhookUrl), 5000)
+          this.scheduleReconnect(orgId, webhookUrl, RECONNECT_DELAY_MS)
         } else {
           log.info('Logged out — not reconnecting')
-          this.sockets.delete(orgId)
         }
       }
     })
@@ -180,50 +251,15 @@ export class BaileysProvider implements WhatsAppProvider {
         if (!msg.message || msg.key.fromMe) continue
 
         const from = msg.key.remoteJid ?? ''
-        const isGroup = from.endsWith('@g.us')
-        const senderPhone = isGroup
-          ? msg.key.participant?.split('@')[0] ?? ''
-          : from.split('@')[0]
+        const keyAny = msg.key as ExtendedMessageKey
+        const { isGroup, groupJid, ambiguous } = resolveGroupInbound(keyAny)
 
-        // LID = WhatsApp privacy id (@lid). Real MSISDN lives on key.senderPn /
-        // participantPn (stanza attrs sender_pn / participant_pn in Baileys 6.7.x).
-        const keyAny = msg.key as typeof msg.key & {
-          senderPn?: string
-          participantPn?: string
-          senderLid?: string
-          remoteJidAlt?: string
-          participantAlt?: string
+        if (ambiguous) {
+          log.debug({ key: msg.key }, 'group inbound without @g.us jid')
         }
+
         const isLid = from.endsWith('@lid')
-          || (isGroup
-            ? String(msg.key.participant ?? '').endsWith('@lid')
-            : false)
-
-        if (isLid) {
-          log.debug(
-            { key: msg.key, verifiedBizName: (msg as { verifiedBizName?: string }).verifiedBizName },
-            'inbound key',
-          )
-        }
-
-        const jidToDigits = (v?: string | null): string | null => {
-          if (!v) return null
-          const bare = String(v).split('@')[0].split(':')[0].replace(/[^0-9]/g, '')
-          return bare || null
-        }
-        const pickPnDigits = (...cands: Array<string | null | undefined>): string | null => {
-          for (const c of cands) {
-            if (!c) continue
-            const s = String(c)
-            // Prefer explicit PN JIDs; never treat @lid as a phone.
-            if (s.endsWith('@lid')) continue
-            if (s.includes('@s.whatsapp.net') || !s.includes('@')) {
-              const d = jidToDigits(s)
-              if (d) return d
-            }
-          }
-          return null
-        }
+          || String(msg.key.participant ?? '').endsWith('@lid')
 
         let senderPn: string | null = pickPnDigits(
           keyAny.senderPn,
@@ -266,8 +302,24 @@ export class BaileysProvider implements WhatsAppProvider {
           }
         }
 
+        const senderPhone = isGroup
+          ? (participantPn ?? jidLocalPart(msg.key.participant ?? ''))
+          : jidLocalPart(from)
+
         const textContent = extractTextContent(msg.message)
         const mediaType = detectMediaType(msg.message)
+
+        const messageTimestampSec = msg.messageTimestamp
+          ? Number(msg.messageTimestamp)
+          : Math.floor(Date.now() / 1000)
+        const ageLimitSeconds = Number(
+          process.env.WA_BACKFILL_AGE_LIMIT_SECONDS ?? DEFAULT_BACKFILL_AGE_LIMIT_SECONDS,
+        )
+        const backfill = evaluateBackfill({
+          messageTimestampSec,
+          lastOpenAtMs: this.lastOpenAtMs.get(orgId) ?? null,
+          ageLimitSeconds,
+        })
 
         const payload: Record<string, unknown> = {
           event: 'message',
@@ -276,24 +328,51 @@ export class BaileysProvider implements WhatsAppProvider {
           from: senderPhone,
           fromName: msg.pushName ?? '',
           message: textContent,
-          timestamp: msg.messageTimestamp
-            ? Number(msg.messageTimestamp)
-            : Math.floor(Date.now() / 1000),
+          timestamp: messageTimestampSec,
           isGroup,
           senderPn: isGroup ? (participantPn ?? senderPn) : senderPn,
-          isLid,
+          isBackfill: backfill.isBackfill,
+          // When true, Hub must persist but must not enqueue for auto-task pipeline.
+          skipDownstream: backfill.isBackfill,
+          backfillReason: backfill.reason,
         }
 
-        if (isGroup) {
-          payload.groupId = from.split('@')[0]
+        if (backfill.isBackfill) {
+          log.info(
+            {
+              orgId,
+              conversation: isGroup ? (groupJid ?? from) : senderPhone,
+              wa_message_id: msg.key.id ?? '',
+              age_seconds: backfill.ageSeconds,
+              reason: backfill.reason,
+            },
+            'Backfill message skipped for downstream processing',
+          )
+        }
+
+        if (isGroup && groupJid) {
+          payload.groupId = jidLocalPart(groupJid)
           payload.participantPn = participantPn
+          payload.senderName = msg.pushName ?? null
+
+          let groupSubject = getCachedSubject(groupJid)
+          if (!groupSubject) {
+            try {
+              const metadata = await sock.groupMetadata(groupJid)
+              groupSubject = metadata.subject ?? null
+              if (groupSubject) setCachedSubject(groupJid, groupSubject)
+            } catch (err) {
+              log.debug({ err: (err as Error).message, groupJid }, 'groupMetadata lookup failed')
+            }
+          }
+          if (groupSubject) payload.groupSubject = groupSubject
         }
         if (mediaType) {
           payload.mediaType = mediaType
         }
 
-        log.info(
-          { from: senderPhone, isGroup, isLid, senderPn: payload.senderPn, mediaType },
+        log.debug(
+          { from: senderPhone, isGroup, groupJid, senderPn: payload.senderPn, mediaType },
           'Incoming message',
         )
 
@@ -360,8 +439,12 @@ export class BaileysProvider implements WhatsAppProvider {
     const keepAuth = options?.keepAuthFiles === true
     const purgeAuth = options?.purgeAuthDir === true
     const log = orgLogger(orgId)
+    this.clearReconnectTimer(orgId)
+    this.stopKeepalive(orgId)
     this.intentionallyStoppedOrgIds.add(orgId)
-    this.sockets.get(orgId)?.end(undefined)
+    const sock = this.sockets.get(orgId)
+    if (sock) this.suppressReconnectSockets.add(sock)
+    sock?.end(undefined)
     this.sockets.delete(orgId)
     this.sessions.delete(orgId)
     if (purgeAuth) {
@@ -389,14 +472,34 @@ export class BaileysProvider implements WhatsAppProvider {
     if (!sock) {
       throw new Error(`Session ${req.orgId} not connected`)
     }
+
+    // Liveness guard: status can still say "connected" on a half-open WS.
+    if (!isSocketOpen(sock)) {
+      // Tear down + schedule reconnect (same path as send_timeout); still fail this send fast.
+      this.forceTeardownAndReconnect(req.orgId, 'half_open_readyState')
+      throw new Error(`Session ${req.orgId} not connected`)
+    }
+
     const jid = formatJid(req.to)
     const content = await buildMessageContent(req)
-    const result = await sock.sendMessage(jid, content)
+    const result = await withTimeout(
+      sock.sendMessage(jid, content) as Promise<{ key?: { id?: string | null } } | undefined>,
+      WA_SEND_TIMEOUT_MS,
+      'send_timeout'
+    )
     return { messageId: result?.key?.id ?? '' }
   }
 
+  /**
+   * Half-open socket recovery: flip status off "connected", tear down, reconnect.
+   * Called when the pool/provider send ACK times out.
+   */
+  onSendTimeout(orgId: string): void {
+    this.forceTeardownAndReconnect(orgId, 'send_timeout')
+  }
+
   /** Expose the raw Baileys socket for group operations (Baileys-only). */
-  getSocket(orgId: string): ReturnType<typeof makeWASocket> | undefined {
+  getSocket(orgId: string): BaileysSocket | undefined {
     return this.sockets.get(orgId)
   }
 
@@ -450,6 +553,141 @@ export class BaileysProvider implements WhatsAppProvider {
     await this.start(toOrgId, webhookUrl)
 
     orgLogger(toOrgId).info({ fromOrgId }, 'Session migrate complete — connected under new org')
+  }
+
+  // ── Recovery / reconnect helpers (exported for regression tests via casting) ──
+
+  /** @internal — test/inspection: pending reconnect timers */
+  getPendingReconnectCount(): number {
+    return this.reconnectTimers.size
+  }
+
+  /** @internal */
+  hasPendingReconnect(orgId: string): boolean {
+    return this.reconnectTimers.has(orgId)
+  }
+
+  /** @internal */
+  getSocketMapSize(): number {
+    return this.sockets.size
+  }
+
+  clearReconnectTimer(orgId: string): void {
+    const existing = this.reconnectTimers.get(orgId)
+    if (existing) {
+      clearTimeout(existing)
+      this.reconnectTimers.delete(orgId)
+    }
+  }
+
+  /**
+   * Schedule exactly one reconnect for orgId. Replaces any prior timer.
+   * Skips start if a socket already exists when the timer fires.
+   */
+  scheduleReconnect(orgId: string, webhookUrl: string | undefined, delayMs: number): void {
+    this.clearReconnectTimer(orgId)
+    if (this.sockets.has(orgId)) {
+      orgLogger(orgId).info('Skipping reconnect schedule — socket already present')
+      return
+    }
+    const timer = setTimeout(() => {
+      this.reconnectTimers.delete(orgId)
+      if (this.sockets.has(orgId)) {
+        orgLogger(orgId).info('Reconnect timer fired but socket already present — skip')
+        return
+      }
+      void this.start(orgId, webhookUrl)
+    }, delayMs)
+    this.reconnectTimers.set(orgId, timer)
+  }
+
+  /**
+   * Shared teardown+reconnect used by send_timeout, half-open readyState, and keepalive.
+   */
+  forceTeardownAndReconnect(orgId: string, reason: string): void {
+    const log = orgLogger(orgId)
+    const session = this.sessions.get(orgId)
+    if (session) {
+      session.status = 'disconnected'
+    }
+    this.stopKeepalive(orgId)
+
+    log.warn(
+      { reason, timeoutMs: WA_SEND_TIMEOUT_MS },
+      'forcing socket teardown + reconnect'
+    )
+    void updateDeviceStatus(orgId, 'disconnected')
+
+    const sock = this.sockets.get(orgId)
+    const webhookUrl = session?.webhookUrl ?? loadSessionMeta(orgId)?.webhookUrl
+    this.sockets.delete(orgId)
+
+    // Suppress close-driven reconnect; we schedule exactly one via reconnectTimers.
+    if (sock) this.suppressReconnectSockets.add(sock)
+    this.intentionallyStoppedOrgIds.add(orgId)
+    try {
+      sock?.end(undefined)
+    } catch {
+      // ignore teardown errors on a dead socket
+    }
+
+    // Clear stop flag so the scheduled start()'s future closes can reconnect.
+    this.intentionallyStoppedOrgIds.delete(orgId)
+    this.scheduleReconnect(orgId, webhookUrl, SEND_TIMEOUT_RECONNECT_DELAY_MS)
+  }
+
+  private startKeepalive(orgId: string): void {
+    this.stopKeepalive(orgId)
+    this.keepaliveMisses.set(orgId, 0)
+    const timer = setInterval(() => {
+      this.probeKeepalive(orgId)
+    }, KEEPALIVE_INTERVAL_MS)
+    // Don't keep the process alive solely for probes.
+    if (typeof timer.unref === 'function') timer.unref()
+    this.keepaliveTimers.set(orgId, timer)
+  }
+
+  /** Exposed for tests: one keepalive probe tick. */
+  probeKeepalive(orgId: string): void {
+    const session = this.sessions.get(orgId)
+    if (!session || session.status !== 'connected') return
+    const sock = this.sockets.get(orgId)
+    if (!sock) {
+      this.forceTeardownAndReconnect(orgId, 'keepalive_missing_socket')
+      return
+    }
+    if (isSocketOpen(sock)) {
+      this.keepaliveMisses.set(orgId, 0)
+      return
+    }
+    const misses = (this.keepaliveMisses.get(orgId) ?? 0) + 1
+    this.keepaliveMisses.set(orgId, misses)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Baileys WebSocketClient; socket is protected
+    const ws = (sock as any).ws as
+      | { isOpen?: boolean; socket?: { readyState?: number }; readyState?: number }
+      | undefined
+    const readyState = ws?.socket?.readyState ?? ws?.readyState
+    if (misses < KEEPALIVE_MISS_THRESHOLD) {
+      orgLogger(orgId).warn(
+        { misses, readyState, isOpen: ws?.isOpen },
+        'keepalive half-open probe miss — waiting for consecutive failure'
+      )
+      return
+    }
+    orgLogger(orgId).warn(
+      { misses, readyState, isOpen: ws?.isOpen },
+      'keepalive detected half-open socket — recovering'
+    )
+    this.forceTeardownAndReconnect(orgId, 'keepalive_half_open')
+  }
+
+  private stopKeepalive(orgId: string): void {
+    const timer = this.keepaliveTimers.get(orgId)
+    if (timer) {
+      clearInterval(timer)
+      this.keepaliveTimers.delete(orgId)
+    }
+    this.keepaliveMisses.delete(orgId)
   }
 }
 
