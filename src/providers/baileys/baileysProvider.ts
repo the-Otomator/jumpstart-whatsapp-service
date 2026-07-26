@@ -39,6 +39,11 @@ import {
   DEFAULT_BACKFILL_AGE_LIMIT_SECONDS,
   evaluateBackfill,
 } from '../../lib/backfillGuard'
+import {
+  isValidWebhookUrl,
+  requireWebhookUrl,
+  WEBHOOK_URL_REQUIRED,
+} from '../../lib/webhookUrl'
 
 const baileysLogger = pino({ level: 'silent' })
 
@@ -89,6 +94,8 @@ export class BaileysProvider implements WhatsAppProvider {
 
   async start(orgId: string, webhookUrl?: string): Promise<void> {
     const log = orgLogger(orgId)
+    // Fail loud before any socket work — a session without a webhook looks healthy but drops inbound.
+    const resolvedWebhookUrl = requireWebhookUrl(webhookUrl)
 
     // Cancel any pending reconnect before (re)starting — single-timer invariant.
     this.clearReconnectTimer(orgId)
@@ -117,14 +124,15 @@ export class BaileysProvider implements WhatsAppProvider {
       orgId,
       provider: 'baileys',
       status: 'connecting',
-      webhookUrl,
+      webhookUrl: resolvedWebhookUrl,
+      lastError: undefined,
     }
     this.sessions.set(orgId, session)
 
     saveSessionMeta({
       orgId,
       provider: 'baileys',
-      webhookUrl,
+      webhookUrl: resolvedWebhookUrl,
       createdAt: new Date().toISOString(),
       autoRestore: true,
     })
@@ -160,7 +168,9 @@ export class BaileysProvider implements WhatsAppProvider {
         // orgId here is the session_key passed to start() (org_id or "org_id-8char").
         await updateDeviceStatus(orgId, 'qr')
         await writeWaDeviceStatus(orgId, 'qr')
-        if (webhookUrl) await postWebhook(webhookUrl, { event: 'qr', orgId, qr: base64 })
+        if (session.webhookUrl) {
+          await postWebhook(session.webhookUrl, { event: 'qr', orgId, qr: base64 })
+        }
       }
 
       if (connection === 'open') {
@@ -189,8 +199,8 @@ export class BaileysProvider implements WhatsAppProvider {
 
         this.startKeepalive(orgId)
 
-        if (webhookUrl) {
-          await postWebhook(webhookUrl, { event: 'connected', orgId, phone: session.phoneNumber })
+        if (session.webhookUrl) {
+          await postWebhook(session.webhookUrl, { event: 'connected', orgId, phone: session.phoneNumber })
         }
       }
 
@@ -208,8 +218,8 @@ export class BaileysProvider implements WhatsAppProvider {
 
         getSenderPool(orgId).onSessionDisconnected(reason)
 
-        if (webhookUrl) {
-          await postWebhook(webhookUrl, { event: 'disconnected', orgId, reason })
+        if (session.webhookUrl) {
+          await postWebhook(session.webhookUrl, { event: 'disconnected', orgId, reason })
         }
 
         // Only drop the map entry if it still points at this closing socket
@@ -237,7 +247,7 @@ export class BaileysProvider implements WhatsAppProvider {
             return
           }
           log.info('Reconnecting in 5 seconds...')
-          this.scheduleReconnect(orgId, webhookUrl, RECONNECT_DELAY_MS)
+          this.scheduleReconnect(orgId, session.webhookUrl, RECONNECT_DELAY_MS)
         } else {
           log.info('Logged out — not reconnecting')
         }
@@ -376,7 +386,7 @@ export class BaileysProvider implements WhatsAppProvider {
           'Incoming message',
         )
 
-        if (webhookUrl) await postWebhook(webhookUrl, payload)
+        if (session.webhookUrl) await postWebhook(session.webhookUrl, payload)
       }
     })
 
@@ -398,8 +408,8 @@ export class BaileysProvider implements WhatsAppProvider {
           getSenderPool(orgId).onMessageDelivered()
         }
 
-        if (webhookUrl) {
-          await postWebhook(webhookUrl, {
+        if (session.webhookUrl) {
+          await postWebhook(session.webhookUrl, {
             event: 'message_status',
             orgId,
             messageId: update.key.id ?? '',
@@ -421,8 +431,8 @@ export class BaileysProvider implements WhatsAppProvider {
         log.debug({ groupJid: ev.id, action: ev.action, count: ev.participants.length }, 'Group participants updated')
       }
 
-      if (webhookUrl) {
-        await postWebhook(webhookUrl, {
+      if (session.webhookUrl) {
+        await postWebhook(session.webhookUrl, {
           event: 'group_participants_update',
           orgId,
           groupJid: ev.id,
@@ -503,8 +513,51 @@ export class BaileysProvider implements WhatsAppProvider {
     return this.sockets.get(orgId)
   }
 
+  /**
+   * Update inbound webhook target without tearing down the Baileys socket.
+   * Event handlers read `session.webhookUrl` on each dispatch, so this takes effect immediately.
+   */
+  updateWebhookUrl(orgId: string, webhookUrl: string): { previous: string | undefined; next: string } {
+    const resolved = requireWebhookUrl(webhookUrl)
+    const session = this.sessions.get(orgId)
+    if (!session) {
+      throw new Error(`Session ${orgId} not found`)
+    }
+    const previous = session.webhookUrl
+    session.webhookUrl = resolved
+    session.lastError = undefined
+    updateSessionMeta(orgId, { webhookUrl: resolved })
+    // Ensure meta exists even if updateSessionMeta no-op'd (no prior meta file).
+    const meta = loadSessionMeta(orgId)
+    if (!meta) {
+      saveSessionMeta({
+        orgId,
+        provider: 'baileys',
+        webhookUrl: resolved,
+        createdAt: new Date().toISOString(),
+        autoRestore: true,
+        phoneNumber: session.phoneNumber,
+      })
+    }
+    return { previous, next: resolved }
+  }
+
   listActiveSessions(): Session[] {
     return Array.from(this.sessions.values())
+  }
+
+  /** Log every stored session whose meta lacks a usable webhookUrl (startup fail-loud). */
+  logSessionsMissingWebhook(): void {
+    for (const orgId of listStoredSessions()) {
+      const meta = loadSessionMeta(orgId)
+      if (!meta || meta.provider === 'meta-cloud') continue
+      if (!isValidWebhookUrl(meta.webhookUrl)) {
+        logger.error(
+          { orgId },
+          'Stored session meta lacks usable webhookUrl — will not auto-restore'
+        )
+      }
+    }
   }
 
   async restoreSessions(): Promise<void> {
@@ -514,12 +567,24 @@ export class BaileysProvider implements WhatsAppProvider {
       return
     }
 
+    this.logSessionsMissingWebhook()
     logger.info({ count: orgIds.length }, 'Restoring sessions from disk')
 
     for (const orgId of orgIds) {
       const meta = loadSessionMeta(orgId)
       if (meta && meta.autoRestore !== false) {
         if (meta.provider === 'meta-cloud') continue
+        if (!isValidWebhookUrl(meta.webhookUrl)) {
+          const lastError = `${WEBHOOK_URL_REQUIRED}: persisted meta has no usable webhookUrl`
+          logger.error({ orgId }, 'Skipping restore: session meta has no usable webhookUrl')
+          this.sessions.set(orgId, {
+            orgId,
+            provider: 'baileys',
+            status: 'disconnected',
+            lastError,
+          })
+          continue
+        }
         try {
           await this.start(orgId, meta.webhookUrl)
           logger.info({ orgId }, 'Session restored')

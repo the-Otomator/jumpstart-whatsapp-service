@@ -1,4 +1,5 @@
 import type { Session } from '../types'
+import { isValidWebhookUrl } from './webhookUrl'
 
 export interface WaDeviceRow {
   id: string
@@ -34,10 +35,22 @@ export interface StateMismatch {
   organizationId: string
 }
 
+/** Hard faults that must not look like healthy sessions. */
+export interface ReconcileError {
+  severity: 'error'
+  code: 'WEBHOOK_URL_MISSING'
+  sessionKey: string
+  name?: string
+  organizationId?: string
+  deviceId?: string
+  message: string
+}
+
 export interface ReconcileResult {
   orphanedSessions: OrphanedSession[]
   orphanedRows: OrphanedRow[]
   stateMismatch: StateMismatch[]
+  errors: ReconcileError[]
 }
 
 /** Pure reconcile — live sessions vs wa_devices rows. Writes nothing. */
@@ -61,6 +74,23 @@ export function reconcileSessions(
 
   const orphanedRows: OrphanedRow[] = []
   const stateMismatch: StateMismatch[] = []
+  const errors: ReconcileError[] = []
+
+  for (const s of live) {
+    if (!isValidWebhookUrl(s.webhookUrl)) {
+      const row = rowByKey.get(s.orgId)
+      errors.push({
+        severity: 'error',
+        code: 'WEBHOOK_URL_MISSING',
+        sessionKey: s.orgId,
+        name: row?.name,
+        organizationId: row?.organization_id,
+        deviceId: row?.id,
+        message: 'Live session has no usable webhookUrl — inbound delivery is silent',
+      })
+    }
+  }
+
   for (const r of rows) {
     const liveSession = liveByKey.get(r.session_key)
     if (!liveSession) {
@@ -92,7 +122,7 @@ export function reconcileSessions(
     }
   }
 
-  return { orphanedSessions, orphanedRows, stateMismatch }
+  return { orphanedSessions, orphanedRows, stateMismatch, errors }
 }
 
 export interface HeartbeatUpdate {
