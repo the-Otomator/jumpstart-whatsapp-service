@@ -149,7 +149,9 @@ export class SenderPool {
     }
     savePoolState(this.state)
     log.info({ phoneNumber, warmupStage: this.state.warmupStage }, 'Sender pool bound to session')
-    this.scheduleProcess()
+    // Reconnect must clear disconnect/emergency pause; otherwise the lane stays
+    // paused forever and queue jobs never reach the worker (hang → client 504).
+    this.resume()
   }
 
   onSessionDisconnected(reason?: string): void {
