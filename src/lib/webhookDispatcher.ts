@@ -1,4 +1,5 @@
 import { logger } from './logger'
+import { redactWebhookUrl } from './webhookUrl'
 
 interface WebhookFailure {
   orgId: string
@@ -25,14 +26,21 @@ export function normalizeJumpstartInboundWebhookUrl(webhookUrl: string): string 
 }
 
 /**
- * Auth expected by Supabase Edge `wa-incoming`:
+ * Auth expected by Jumpstart Edge inbound webhooks (`wa-webhook` live; `wa-incoming` legacy):
  *   `?secret=<WA_INCOMING_SECRET>` OR `Authorization: Bearer <WA_INCOMING_SECRET>`
- * Some sessions (e.g. WorkMatch) already embed `?secret=` in webhookUrl.
+ * Some sessions already embed `?secret=` in webhookUrl — do not also attach Bearer.
  * Hub/Otomator sessions that omit it get 401 unless we attach a Bearer from env.
  *
  * Env (VPS): WA_INCOMING_SECRET — must match the Edge Function's WA_INCOMING_SECRET / API_SECRET.
  * Never hardcode secrets here.
  */
+function isJumpstartInboundWebhookPath(url: string): boolean {
+  return (
+    url.includes('/functions/v1/wa-incoming') ||
+    url.includes('/functions/v1/wa-webhook')
+  )
+}
+
 export function buildWebhookHeaders(url: string, payload: Record<string, unknown>): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const orgId = typeof payload.orgId === 'string' ? payload.orgId : undefined
@@ -40,7 +48,7 @@ export function buildWebhookHeaders(url: string, payload: Record<string, unknown
     headers['x-wa-session-key'] = orgId
   }
 
-  if (url.includes('/functions/v1/wa-incoming')) {
+  if (isJumpstartInboundWebhookPath(url)) {
     let hasQuerySecret = false
     try {
       hasQuerySecret = new URL(url).searchParams.has('secret')
@@ -71,13 +79,19 @@ async function attemptPost(url: string, payload: object, attempt: number): Promi
     clearTimeout(timeout)
 
     if (!res.ok) {
-      logger.warn({ url, status: res.status, attempt }, 'Webhook returned non-OK status')
+      logger.warn(
+        { url: redactWebhookUrl(url), status: res.status, attempt },
+        'Webhook returned non-OK status'
+      )
       return false
     }
 
     return true
   } catch (err) {
-    logger.warn({ url, attempt, err: (err as Error).message }, 'Webhook request failed')
+    logger.warn(
+      { url: redactWebhookUrl(url), attempt, err: (err as Error).message },
+      'Webhook request failed'
+    )
     return false
   }
 }
@@ -103,7 +117,7 @@ export async function postWebhook(webhookUrl: string, payload: Record<string, un
   // All retries exhausted — log failure
   const failure: WebhookFailure = {
     orgId,
-    url,
+    url: redactWebhookUrl(url),
     payload,
     attempts: MAX_RETRIES,
     lastError: 'All retry attempts exhausted',
@@ -113,7 +127,10 @@ export async function postWebhook(webhookUrl: string, payload: Record<string, un
   failureLog.push(failure)
   if (failureLog.length > MAX_FAILURES_STORED) failureLog.shift()
 
-  logger.error({ orgId, url: webhookUrl }, 'Webhook delivery failed after all retries')
+  logger.error(
+    { orgId, url: redactWebhookUrl(url) },
+    'Webhook delivery failed after all retries'
+  )
 }
 
 /** Get recent webhook failures (optionally filtered by orgId) */

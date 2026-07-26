@@ -17,15 +17,15 @@ export interface SessionMeta {
   metaWabaId?: string
 }
 
-const SESSIONS_DIR = path.join(process.cwd(), 'sessions')
+const SESSIONS_DIR = (): string => path.join(process.cwd(), 'sessions')
 
 function metaPath(orgId: string): string {
-  return path.join(SESSIONS_DIR, orgId, 'meta.json')
+  return path.join(SESSIONS_DIR(), orgId, 'meta.json')
 }
 
 /** Save session metadata to disk */
 export function saveSessionMeta(meta: SessionMeta): void {
-  const dir = path.join(SESSIONS_DIR, meta.orgId)
+  const dir = path.join(SESSIONS_DIR(), meta.orgId)
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
 
   fs.writeFileSync(metaPath(meta.orgId), JSON.stringify(meta, null, 2), 'utf-8')
@@ -66,7 +66,7 @@ export function deleteSessionMeta(orgId: string): void {
 
 /** Remove `sessions/<orgId>` (creds, meta, keys) — next pairing needs a new QR scan */
 export function deleteSessionAuthDir(orgId: string): void {
-  const dir = path.join(SESSIONS_DIR, orgId)
+  const dir = path.join(SESSIONS_DIR(), orgId)
   if (fs.existsSync(dir)) {
     fs.rmSync(dir, { recursive: true, force: true })
     logger.debug({ orgId }, 'Session directory removed')
@@ -75,10 +75,11 @@ export function deleteSessionAuthDir(orgId: string): void {
 
 /** List all org IDs that have session directories (for auto-restore) */
 export function listStoredSessions(): string[] {
-  if (!fs.existsSync(SESSIONS_DIR)) return []
+  const root = SESSIONS_DIR()
+  if (!fs.existsSync(root)) return []
 
-  return fs.readdirSync(SESSIONS_DIR).filter((name) => {
-    const dir = path.join(SESSIONS_DIR, name)
+  return fs.readdirSync(root).filter((name) => {
+    const dir = path.join(root, name)
     return (
       fs.statSync(dir).isDirectory() &&
       (fs.existsSync(path.join(dir, 'creds.json')) || fs.existsSync(path.join(dir, 'meta.json')))
@@ -96,8 +97,8 @@ export function migrateSessionAuthDir(fromOrgId: string, toOrgId: string): void 
     return
   }
 
-  const fromDir = path.join(SESSIONS_DIR, fromOrgId)
-  const toDir = path.join(SESSIONS_DIR, toOrgId)
+  const fromDir = path.join(SESSIONS_DIR(), fromOrgId)
+  const toDir = path.join(SESSIONS_DIR(), toOrgId)
   const fromCreds = path.join(fromDir, 'creds.json')
   const toCreds = path.join(toDir, 'creds.json')
 

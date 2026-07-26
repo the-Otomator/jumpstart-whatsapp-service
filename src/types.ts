@@ -6,7 +6,10 @@ export interface Session {
   status: 'connecting' | 'qr' | 'connected' | 'disconnected'
   qr?: string
   phoneNumber?: string
+  /** Inbound delivery target — never expose raw value in list APIs (may carry ?secret=). */
   webhookUrl?: string
+  /** Last session-level fault (e.g. restore skipped for missing webhook). */
+  lastError?: string
 }
 
 export type MessageType =

@@ -9,8 +9,21 @@ export const orgIdSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/, 'Invalid or
 /** Phone number: digits only, 10-15 chars (international without +) */
 export const phoneSchema = z.string().regex(/^\d{10,15}$/, 'Phone must be 10-15 digits, no + prefix')
 
-/** Webhook URL: must be valid https URL */
+/** Webhook URL: optional absolute https URL (legacy start body — presence enforced in route). */
 export const webhookUrlSchema = z.string().url('Must be a valid URL').startsWith('https', 'Webhook URL must use HTTPS').optional()
+
+/** Required webhook URL for PATCH / webhook updates (absolute https). */
+export const requiredWebhookUrlSchema = z
+  .string()
+  .url('Must be a valid URL')
+  .refine((u) => {
+    try {
+      const p = new URL(u)
+      return p.protocol === 'http:' || p.protocol === 'https:'
+    } catch {
+      return false
+    }
+  }, 'Must be an absolute http(s) URL')
 
 // ── Request body schemas ────────────────────────────────────────
 
@@ -22,6 +35,10 @@ export const startSessionSchema = z.object({
   metaAccessToken: z.string().optional(),
   metaPhoneNumberId: z.string().optional(),
   metaWabaId: z.string().optional(),
+})
+
+export const updateWebhookSchema = z.object({
+  webhookUrl: requiredWebhookUrlSchema,
 })
 
 export const migrateSessionSchema = z.object({

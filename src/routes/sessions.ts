@@ -6,12 +6,15 @@ import {
   getStatus,
   stopSession,
   listActiveSessions,
+  updateSessionWebhook,
+  WebhookUrlRequiredError,
 } from '../sessionManager'
 import {
   validateBody,
   validateParams,
   startSessionSchema,
   migrateSessionSchema,
+  updateWebhookSchema,
   orgIdParamsSchema,
   sessionPathSendBodySchema,
 } from '../middleware/validate'
@@ -20,17 +23,21 @@ import { orgLogger } from '../lib/logger'
 import { validateOrg, supabase } from '../lib/supabase'
 import { jumpstartSupabase } from '../lib/jumpstartSupabase'
 import { reconcileSessions, type WaDeviceRow } from '../lib/waDeviceReconcile'
+import { isValidWebhookUrl, redactWebhookUrl, WEBHOOK_URL_REQUIRED } from '../lib/webhookUrl'
 import { sendWhatsAppMessage } from './messages'
 
 const router = Router()
 
 // ── List all active sessions ────────────────────────────────────
 router.get('/', (_req: Request, res: Response) => {
-  const all = listActiveSessions().map(({ qr, ...rest }) => rest)
-  res.json({ sessions: all, count: all.length })
+  const sessions = listActiveSessions().map(({ qr, webhookUrl, ...rest }) => ({
+    ...rest,
+    hasWebhookUrl: isValidWebhookUrl(webhookUrl),
+  }))
+  res.json({ sessions, count: sessions.length })
 })
 
-// ── Reconcile live sessions vs Jumpstart wa_devices (read-only) ─
+// ── Reconcile live sessions vs Jumpstart wa_devices ─────────────
 router.get('/reconcile', async (_req: Request, res: Response) => {
   if (!jumpstartSupabase) {
     res.status(503).json({
@@ -53,10 +60,28 @@ router.get('/reconcile', async (_req: Request, res: Response) => {
     }
 
     const result = reconcileSessions(live, (data ?? []) as WaDeviceRow[])
+
+    // Persist missing-webhook faults onto wa_devices so Hub surfaces them.
+    const lastErrorWrites: Array<{ sessionKey: string; ok: boolean; error?: string }> = []
+    for (const err of result.errors) {
+      if (err.code !== 'WEBHOOK_URL_MISSING' || !err.deviceId) continue
+      const last_error = 'WEBHOOK_URL_MISSING: live session has no usable webhookUrl'
+      const { error: writeErr } = await jumpstartSupabase
+        .from('wa_devices')
+        .update({ last_error })
+        .eq('id', err.deviceId)
+      lastErrorWrites.push({
+        sessionKey: err.sessionKey,
+        ok: !writeErr,
+        error: writeErr?.message,
+      })
+    }
+
     res.json({
       ...result,
       liveCount: live.length,
       dbCount: (data ?? []).length,
+      lastErrorWrites,
     })
   } catch (err) {
     res.status(500).json({
@@ -120,6 +145,14 @@ router.post(
     const { webhookUrl, provider: providerType, metaAccessToken, metaPhoneNumberId, metaWabaId } = req.body
     const log = orgLogger(orgId)
 
+    if (!isValidWebhookUrl(webhookUrl)) {
+      res.status(400).json({
+        error: 'webhookUrl is required and must be an absolute http(s) URL',
+        code: WEBHOOK_URL_REQUIRED,
+      })
+      return
+    }
+
     const orgCheck = await validateOrg(orgId)
     if (!orgCheck.valid) {
       res.status(403).json({
@@ -139,11 +172,56 @@ router.post(
       const initialStatus = providerType === 'meta-cloud' ? 'connected' : 'connecting'
       res.json({ success: true, orgId, status: initialStatus, provider: providerType ?? 'baileys' })
     } catch (err) {
+      if (err instanceof WebhookUrlRequiredError) {
+        res.status(400).json({ error: err.message, code: err.code })
+        return
+      }
       log.error({ err }, 'Failed to start session')
       res.status(500).json({
         error: (err as Error).message,
         code: 'SESSION_START_FAILED',
       })
+    }
+  }
+)
+
+// ── Update webhook without reconnecting the socket ──────────────
+router.patch(
+  '/:orgId/webhook',
+  validateParams(orgIdParamsSchema),
+  validateBody(updateWebhookSchema),
+  (req: Request, res: Response) => {
+    const { orgId } = req.params
+    const { webhookUrl } = req.body as { webhookUrl: string }
+    const log = orgLogger(orgId)
+
+    try {
+      const { previous, next } = updateSessionWebhook(orgId, webhookUrl)
+      log.info(
+        {
+          previous: previous ? redactWebhookUrl(previous) : null,
+          next: redactWebhookUrl(next),
+        },
+        'Session webhookUrl updated without reconnect'
+      )
+      res.json({
+        success: true,
+        orgId,
+        previousWebhookUrl: previous ? redactWebhookUrl(previous) : null,
+        webhookUrl: redactWebhookUrl(next),
+      })
+    } catch (err) {
+      if (err instanceof WebhookUrlRequiredError) {
+        res.status(400).json({ error: err.message, code: err.code })
+        return
+      }
+      const msg = (err as Error).message
+      if (msg.includes('not found')) {
+        res.status(404).json({ error: msg, code: 'SESSION_NOT_FOUND' })
+        return
+      }
+      log.error({ err: msg }, 'Failed to update webhookUrl')
+      res.status(500).json({ error: msg, code: 'WEBHOOK_UPDATE_FAILED' })
     }
   }
 )

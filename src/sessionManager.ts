@@ -6,7 +6,9 @@ import {
   type ProviderType,
 } from './providers'
 import { BaileysProvider } from './providers/baileys/baileysProvider'
+import { MetaCloudProvider } from './providers/meta-cloud/metaCloudProvider'
 import makeWASocket from '@whiskeysockets/baileys'
+import { requireWebhookUrl, WebhookUrlRequiredError } from './lib/webhookUrl'
 
 export async function startSession(
   orgId: string,
@@ -14,10 +16,13 @@ export async function startSession(
   providerType: ProviderType = 'baileys',
   metaConfig?: { accessToken?: string; phoneNumberId?: string; wabaId?: string }
 ): Promise<void> {
+  // Reject before any provider/socket work when webhook target is missing or invalid.
+  requireWebhookUrl(webhookUrl)
+
   const provider = getProvider(providerType)
   // For meta-cloud, the start() method accepts config as 3rd argument
   if (providerType === 'meta-cloud') {
-    await (provider as any).start(orgId, webhookUrl, metaConfig)
+    await (provider as MetaCloudProvider).start(orgId, webhookUrl, metaConfig)
   } else {
     await provider.start(orgId, webhookUrl)
   }
@@ -61,8 +66,33 @@ export function getBaileysSocket(orgId: string): ReturnType<typeof makeWASocket>
   return provider.getSocket(orgId)
 }
 
+/**
+ * Update webhookUrl on a live session without reconnecting.
+ * Works for Baileys and Meta Cloud sessions currently in memory.
+ */
+export function updateSessionWebhook(
+  orgId: string,
+  webhookUrl: string
+): { previous: string | undefined; next: string } {
+  const resolved = requireWebhookUrl(webhookUrl)
+  const provider = getProviderForOrg(orgId)
+  if (!provider) {
+    throw new Error(`Session ${orgId} not found`)
+  }
+
+  if (provider.type === 'baileys') {
+    return (provider as BaileysProvider).updateWebhookUrl(orgId, resolved)
+  }
+  if (provider.type === 'meta-cloud') {
+    return (provider as MetaCloudProvider).updateWebhookUrl(orgId, resolved)
+  }
+  throw new Error(`Provider ${provider.type} does not support webhook update`)
+}
+
 export async function restoreSessions(): Promise<void> {
   for (const provider of getAllProviders()) {
     await provider.restoreSessions()
   }
 }
+
+export { WebhookUrlRequiredError }

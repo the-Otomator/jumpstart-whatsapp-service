@@ -93,6 +93,43 @@ function testReconcile(): void {
   )
   assert.strictEqual(r.stateMismatch[0].liveStatus, 'connected')
   assert.strictEqual(r.stateMismatch[0].dbStatus, 'disconnected')
+  // Both live sessions lack webhookUrl → hard errors
+  assert.strictEqual(r.errors.length, 2)
+  assert.ok(r.errors.every((e) => e.code === 'WEBHOOK_URL_MISSING' && e.severity === 'error'))
+}
+
+function testReconcileMissingWebhookError(): void {
+  const live: Session[] = [
+    {
+      orgId: 'sess-ok',
+      provider: 'baileys',
+      status: 'connected',
+      webhookUrl: 'https://example.test/functions/v1/wa-webhook',
+    },
+    {
+      orgId: 'sess-bad',
+      provider: 'baileys',
+      status: 'connected',
+      // no webhookUrl
+    },
+  ]
+  const rows: WaDeviceRow[] = [
+    {
+      id: 'dev-bad',
+      organization_id: 'org-1',
+      name: 'Bad device',
+      session_key: 'sess-bad',
+      status: 'connected',
+      phone_number: null,
+      last_error: null,
+    },
+  ]
+  const r = reconcileSessions(live, rows)
+  assert.strictEqual(r.errors.length, 1)
+  assert.strictEqual(r.errors[0].code, 'WEBHOOK_URL_MISSING')
+  assert.strictEqual(r.errors[0].severity, 'error')
+  assert.strictEqual(r.errors[0].sessionKey, 'sess-bad')
+  assert.strictEqual(r.errors[0].deviceId, 'dev-bad')
 }
 
 function testHeartbeatPayload(): void {
@@ -135,5 +172,6 @@ function testHeartbeatPayload(): void {
 
 testFormatDisconnectReason()
 testReconcile()
+testReconcileMissingWebhookError()
 testHeartbeatPayload()
 console.log('waDeviceMonitor.test.ts: all passed')

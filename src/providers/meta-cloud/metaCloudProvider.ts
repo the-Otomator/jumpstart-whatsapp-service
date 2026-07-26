@@ -1,8 +1,13 @@
 import type { WhatsAppProvider, SendResult, ProviderType } from '../types'
 import type { Session, SendMessageRequest } from '../../types'
 import { postWebhook } from '../../lib/webhookDispatcher'
-import { saveSessionMeta, loadSessionMeta, deleteSessionMeta, listStoredSessions } from '../../lib/sessionStore'
+import { saveSessionMeta, loadSessionMeta, deleteSessionMeta, listStoredSessions, updateSessionMeta } from '../../lib/sessionStore'
 import { logger, orgLogger } from '../../lib/logger'
+import {
+  isValidWebhookUrl,
+  requireWebhookUrl,
+  WEBHOOK_URL_REQUIRED,
+} from '../../lib/webhookUrl'
 
 interface MetaCloudConfig {
   accessToken: string
@@ -22,6 +27,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
 
   async start(orgId: string, webhookUrl?: string, config?: Partial<MetaCloudConfig>): Promise<void> {
     const log = orgLogger(orgId)
+    const resolvedWebhookUrl = requireWebhookUrl(webhookUrl)
 
     // Use provided config or fall back to environment defaults
     const accessToken = config?.accessToken ?? process.env.META_CLOUD_API_ACCESS_TOKEN
@@ -36,7 +42,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
       accessToken,
       phoneNumberId,
       wabaId: wabaId ?? '',
-      webhookUrl,
+      webhookUrl: resolvedWebhookUrl,
     }
 
     // Validate the token by fetching phone number info
@@ -56,7 +62,8 @@ export class MetaCloudProvider implements WhatsAppProvider {
       provider: 'meta-cloud',
       status: 'connected',  // Meta Cloud is immediately connected (no QR)
       phoneNumber: phoneInfo.display_phone_number?.replace(/[^0-9]/g, ''),
-      webhookUrl,
+      webhookUrl: resolvedWebhookUrl,
+      lastError: undefined,
     }
 
     this.sessions.set(orgId, session)
@@ -66,7 +73,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
     saveSessionMeta({
       orgId,
       provider: 'meta-cloud',
-      webhookUrl,
+      webhookUrl: resolvedWebhookUrl,
       createdAt: new Date().toISOString(),
       phoneNumber: session.phoneNumber,
       lastConnected: new Date().toISOString(),
@@ -78,9 +85,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
 
     log.info({ phone: session.phoneNumber, phoneNumberId }, 'Meta Cloud session started')
 
-    if (webhookUrl) {
-      await postWebhook(webhookUrl, { event: 'connected', orgId, phone: session.phoneNumber, provider: 'meta-cloud' })
-    }
+    await postWebhook(resolvedWebhookUrl, { event: 'connected', orgId, phone: session.phoneNumber, provider: 'meta-cloud' })
   }
 
   stop(orgId: string, options?: { keepAuthFiles?: boolean; purgeAuthDir?: boolean }): void {
@@ -133,11 +138,38 @@ export class MetaCloudProvider implements WhatsAppProvider {
     return Array.from(this.sessions.values())
   }
 
+  updateWebhookUrl(orgId: string, webhookUrl: string): { previous: string | undefined; next: string } {
+    const resolved = requireWebhookUrl(webhookUrl)
+    const session = this.sessions.get(orgId)
+    if (!session) {
+      throw new Error(`Session ${orgId} not found`)
+    }
+    const previous = session.webhookUrl
+    session.webhookUrl = resolved
+    session.lastError = undefined
+    const config = this.configs.get(orgId)
+    if (config) config.webhookUrl = resolved
+    updateSessionMeta(orgId, { webhookUrl: resolved })
+    return { previous, next: resolved }
+  }
+
   async restoreSessions(): Promise<void> {
     const orgIds = listStoredSessions()
     for (const orgId of orgIds) {
       const meta = loadSessionMeta(orgId)
       if (!meta || meta.provider !== 'meta-cloud') continue
+
+      if (!isValidWebhookUrl(meta.webhookUrl)) {
+        const lastError = `${WEBHOOK_URL_REQUIRED}: persisted meta has no usable webhookUrl`
+        logger.error({ orgId }, 'Skipping Meta Cloud restore: session meta has no usable webhookUrl')
+        this.sessions.set(orgId, {
+          orgId,
+          provider: 'meta-cloud',
+          status: 'disconnected',
+          lastError,
+        })
+        continue
+      }
 
       try {
         await this.start(orgId, meta.webhookUrl, {
