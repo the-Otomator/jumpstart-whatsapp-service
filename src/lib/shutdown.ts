@@ -4,12 +4,21 @@ import { listActiveSessions, stopSession } from '../sessionManager'
 
 let isShuttingDown = false
 
-export function setupGracefulShutdown(server: Server): void {
+export function setupGracefulShutdown(
+  server: Server,
+  opts?: { onShutdown?: () => void }
+): void {
   const shutdown = async (signal: string) => {
     if (isShuttingDown) return
     isShuttingDown = true
 
     logger.info({ signal }, 'Shutdown signal received, cleaning up...')
+
+    try {
+      opts?.onShutdown?.()
+    } catch (err) {
+      logger.warn({ err }, 'onShutdown hook failed')
+    }
 
     // 1. Stop accepting new connections
     server.close(() => {

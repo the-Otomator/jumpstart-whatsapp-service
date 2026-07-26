@@ -18,6 +18,8 @@ import {
 import { getWebhookFailures, clearWebhookFailures } from '../lib/webhookDispatcher'
 import { orgLogger } from '../lib/logger'
 import { validateOrg, supabase } from '../lib/supabase'
+import { jumpstartSupabase } from '../lib/jumpstartSupabase'
+import { reconcileSessions, type WaDeviceRow } from '../lib/waDeviceReconcile'
 import { sendWhatsAppMessage } from './messages'
 
 const router = Router()
@@ -26,6 +28,42 @@ const router = Router()
 router.get('/', (_req: Request, res: Response) => {
   const all = listActiveSessions().map(({ qr, ...rest }) => rest)
   res.json({ sessions: all, count: all.length })
+})
+
+// ── Reconcile live sessions vs Jumpstart wa_devices (read-only) ─
+router.get('/reconcile', async (_req: Request, res: Response) => {
+  if (!jumpstartSupabase) {
+    res.status(503).json({
+      error: 'JUMPSTART_SUPABASE_SERVICE_KEY not configured',
+      code: 'JUMPSTART_NOT_CONFIGURED',
+    })
+    return
+  }
+
+  try {
+    const live = listActiveSessions()
+    // alerted_at is optional until migration 20270727120000 is applied
+    const { data, error } = await jumpstartSupabase
+      .from('wa_devices')
+      .select('id, organization_id, name, session_key, status, phone_number, last_error')
+
+    if (error) {
+      res.status(500).json({ error: error.message, code: 'RECONCILE_QUERY_FAILED' })
+      return
+    }
+
+    const result = reconcileSessions(live, (data ?? []) as WaDeviceRow[])
+    res.json({
+      ...result,
+      liveCount: live.length,
+      dbCount: (data ?? []).length,
+    })
+  } catch (err) {
+    res.status(500).json({
+      error: (err as Error).message,
+      code: 'RECONCILE_FAILED',
+    })
+  }
 })
 
 // ── Register an org as a partner slot ─────────────────────────

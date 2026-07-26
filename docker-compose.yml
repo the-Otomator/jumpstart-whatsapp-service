@@ -10,6 +10,10 @@ services:
       - "127.0.0.1:${PORT:-3001}:3001"
     env_file:
       - .env
+    environment:
+      # Runtime fallback so /health reports SHA even if image was built without args
+      GIT_SHA: ${GIT_SHA:-unknown}
+      GIT_BRANCH: ${GIT_BRANCH:-unknown}
     volumes:
       - sessions-data:/app/sessions
     healthcheck:

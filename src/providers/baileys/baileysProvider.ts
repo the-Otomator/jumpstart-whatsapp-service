@@ -14,6 +14,8 @@ import type { WhatsAppProvider, SendResult, ProviderType } from '../types'
 import type { Session, SendMessageRequest } from '../../types'
 import { logger, orgLogger } from '../../lib/logger'
 import { updateDeviceStatus } from '../../lib/supabase'
+import { writeWaDeviceStatus } from '../../lib/waDeviceWrite'
+import { formatDisconnectReason } from '../../lib/disconnectReason'
 import { postWebhook, rekeyWebhookFailures } from '../../lib/webhookDispatcher'
 import { getSenderPool } from '../../pool'
 import {
@@ -157,6 +159,7 @@ export class BaileysProvider implements WhatsAppProvider {
         log.info('QR code generated, waiting for scan')
         // orgId here is the session_key passed to start() (org_id or "org_id-8char").
         await updateDeviceStatus(orgId, 'qr')
+        await writeWaDeviceStatus(orgId, 'qr')
         if (webhookUrl) await postWebhook(webhookUrl, { event: 'qr', orgId, qr: base64 })
       }
 
@@ -180,6 +183,7 @@ export class BaileysProvider implements WhatsAppProvider {
         // immediately. This also makes the first connected device the de-facto
         // default sender (probe keys on status === 'connected').
         await updateDeviceStatus(orgId, 'connected', session.phoneNumber)
+        await writeWaDeviceStatus(orgId, 'connected', { phoneNumber: session.phoneNumber })
 
         getSenderPool(orgId).onSessionConnected(session.phoneNumber)
 
@@ -192,14 +196,15 @@ export class BaileysProvider implements WhatsAppProvider {
 
       if (connection === 'close') {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
-        const reason = DisconnectReason[statusCode as number] ?? `unknown (${statusCode})`
+        const reason = formatDisconnectReason(lastDisconnect)
         session.status = 'disconnected'
         this.stopKeepalive(orgId)
 
         log.warn({ statusCode, reason }, 'Session disconnected')
 
-        // Reflect the disconnect in the DB (keep phone_number untouched).
+        // Reflect the disconnect in Hub + Jumpstart wa_devices with a real last_error.
         await updateDeviceStatus(orgId, 'disconnected')
+        await writeWaDeviceStatus(orgId, 'disconnected', { lastError: reason })
 
         getSenderPool(orgId).onSessionDisconnected(reason)
 
