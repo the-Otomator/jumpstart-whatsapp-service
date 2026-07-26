@@ -33,6 +33,10 @@ import {
   pickPnDigits,
 } from '../../lib/groupInbound'
 import { getCachedSubject, setCachedSubject } from '../../lib/groupSubjectCache'
+import {
+  DEFAULT_BACKFILL_AGE_LIMIT_SECONDS,
+  evaluateBackfill,
+} from '../../lib/backfillGuard'
 
 const baileysLogger = pino({ level: 'silent' })
 
@@ -78,6 +82,8 @@ export class BaileysProvider implements WhatsAppProvider {
   private keepaliveTimers = new Map<string, ReturnType<typeof setInterval>>()
   /** Consecutive half-open keepalive misses per org; reset on a successful open probe. */
   private keepaliveMisses = new Map<string, number>()
+  /** Wall-clock ms when connection.update → open last fired (reconnect backfill window). */
+  private lastOpenAtMs = new Map<string, number>()
 
   async start(orgId: string, webhookUrl?: string): Promise<void> {
     const log = orgLogger(orgId)
@@ -158,6 +164,7 @@ export class BaileysProvider implements WhatsAppProvider {
         // Fresh live socket — clear stop flag so future unintentional closes reconnect.
         // Old replaced socket remains suppressed via suppressReconnectSockets.
         this.intentionallyStoppedOrgIds.delete(orgId)
+        this.lastOpenAtMs.set(orgId, Date.now())
         session.status = 'connected'
         session.phoneNumber = sock.user?.id?.split(':')[0]
         session.qr = undefined
@@ -297,6 +304,18 @@ export class BaileysProvider implements WhatsAppProvider {
         const textContent = extractTextContent(msg.message)
         const mediaType = detectMediaType(msg.message)
 
+        const messageTimestampSec = msg.messageTimestamp
+          ? Number(msg.messageTimestamp)
+          : Math.floor(Date.now() / 1000)
+        const ageLimitSeconds = Number(
+          process.env.WA_BACKFILL_AGE_LIMIT_SECONDS ?? DEFAULT_BACKFILL_AGE_LIMIT_SECONDS,
+        )
+        const backfill = evaluateBackfill({
+          messageTimestampSec,
+          lastOpenAtMs: this.lastOpenAtMs.get(orgId) ?? null,
+          ageLimitSeconds,
+        })
+
         const payload: Record<string, unknown> = {
           event: 'message',
           orgId,
@@ -304,11 +323,26 @@ export class BaileysProvider implements WhatsAppProvider {
           from: senderPhone,
           fromName: msg.pushName ?? '',
           message: textContent,
-          timestamp: msg.messageTimestamp
-            ? Number(msg.messageTimestamp)
-            : Math.floor(Date.now() / 1000),
+          timestamp: messageTimestampSec,
           isGroup,
           senderPn: isGroup ? (participantPn ?? senderPn) : senderPn,
+          isBackfill: backfill.isBackfill,
+          // When true, Hub must persist but must not enqueue for auto-task pipeline.
+          skipDownstream: backfill.isBackfill,
+          backfillReason: backfill.reason,
+        }
+
+        if (backfill.isBackfill) {
+          log.info(
+            {
+              orgId,
+              conversation: isGroup ? (groupJid ?? from) : senderPhone,
+              wa_message_id: msg.key.id ?? '',
+              age_seconds: backfill.ageSeconds,
+              reason: backfill.reason,
+            },
+            'Backfill message skipped for downstream processing',
+          )
         }
 
         if (isGroup && groupJid) {
