@@ -14,6 +14,8 @@ import type { WhatsAppProvider, SendResult, ProviderType } from '../types'
 import type { Session, SendMessageRequest } from '../../types'
 import { logger, orgLogger } from '../../lib/logger'
 import { updateDeviceStatus } from '../../lib/supabase'
+import { writeWaDeviceStatus } from '../../lib/waDeviceWrite'
+import { formatDisconnectReason } from '../../lib/disconnectReason'
 import { postWebhook, rekeyWebhookFailures } from '../../lib/webhookDispatcher'
 import { getSenderPool } from '../../pool'
 import {
@@ -28,11 +30,30 @@ import {
 
 const baileysLogger = pino({ level: 'silent' })
 
+const WS_OPEN = 1
+
+type BaileysSocket = ReturnType<typeof makeWASocket>
+
+/**
+ * Baileys 6.7+ wraps the raw `ws` in WebSocketClient: no `.readyState` on `sock.ws`,
+ * use `sock.ws.isOpen` (or `sock.ws.socket.readyState`). Legacy/raw sockets still expose readyState.
+ */
+export function isSocketOpen(sock: BaileysSocket | undefined): boolean {
+  if (!sock) return false
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Baileys WebSocketClient; socket is protected
+  const ws = (sock as any).ws as
+    | { isOpen?: boolean; socket?: { readyState?: number }; readyState?: number }
+    | undefined
+  if (ws && typeof ws.isOpen === 'boolean') return ws.isOpen
+  const raw = ws?.socket ?? ws
+  return raw?.readyState === WS_OPEN
+}
+
 export class BaileysProvider implements WhatsAppProvider {
   readonly type: ProviderType = 'baileys'
 
   private sessions = new Map<string, Session>()
-  private sockets = new Map<string, ReturnType<typeof makeWASocket>>()
+  private sockets = new Map<string, BaileysSocket>()
   private intentionallyStoppedOrgIds = new Set<string>()
 
   async start(orgId: string, webhookUrl?: string): Promise<void> {
@@ -89,6 +110,7 @@ export class BaileysProvider implements WhatsAppProvider {
         log.info('QR code generated, waiting for scan')
         // orgId here is the session_key passed to start() (org_id or "org_id-8char").
         await updateDeviceStatus(orgId, 'qr')
+        await writeWaDeviceStatus(orgId, 'qr')
         if (webhookUrl) await postWebhook(webhookUrl, { event: 'qr', orgId, qr: base64 })
       }
 
@@ -108,6 +130,7 @@ export class BaileysProvider implements WhatsAppProvider {
         // immediately. This also makes the first connected device the de-facto
         // default sender (probe keys on status === 'connected').
         await updateDeviceStatus(orgId, 'connected', session.phoneNumber)
+        await writeWaDeviceStatus(orgId, 'connected', { phoneNumber: session.phoneNumber })
 
         getSenderPool(orgId).onSessionConnected(session.phoneNumber)
 
@@ -118,13 +141,14 @@ export class BaileysProvider implements WhatsAppProvider {
 
       if (connection === 'close') {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
-        const reason = DisconnectReason[statusCode as number] ?? `unknown (${statusCode})`
+        const reason = formatDisconnectReason(lastDisconnect)
         session.status = 'disconnected'
 
         log.warn({ statusCode, reason }, 'Session disconnected')
 
-        // Reflect the disconnect in the DB (keep phone_number untouched).
+        // Reflect the disconnect in Hub + Jumpstart wa_devices with a real last_error.
         await updateDeviceStatus(orgId, 'disconnected')
+        await writeWaDeviceStatus(orgId, 'disconnected', { lastError: reason })
 
         getSenderPool(orgId).onSessionDisconnected(reason)
 

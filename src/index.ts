@@ -21,6 +21,11 @@ import { listActiveSessions, restoreSessions } from './sessionManager'
 import { logger } from './lib/logger'
 import { requestIdMiddleware } from './middleware/requestId'
 import { setupGracefulShutdown } from './lib/shutdown'
+import {
+  startWaDeviceMonitor,
+  stopWaDeviceMonitor,
+  getHeartbeatFailures,
+} from './lib/waDeviceMonitor'
 
 const execAsync = promisify(exec)
 
@@ -185,6 +190,7 @@ app.get('/health', async (_req, res) => {
     },
     disk,
     recentErrors,
+    heartbeatFailures: getHeartbeatFailures(),
   })
 })
 
@@ -225,7 +231,9 @@ const server = app.listen(PORT, async () => {
   } catch (err) {
     logger.error({ err }, 'Error during session restore')
   }
+
+  startWaDeviceMonitor()
 })
 
 // Graceful shutdown
-setupGracefulShutdown(server)
+setupGracefulShutdown(server, { onShutdown: stopWaDeviceMonitor })

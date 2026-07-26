@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "test": "npx ts-node --transpile-only src/lib/waDeviceMonitor.test.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
