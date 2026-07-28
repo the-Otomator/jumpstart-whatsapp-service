@@ -27,6 +27,7 @@ import {
   stopWaDeviceMonitor,
   getHeartbeatFailures,
 } from './lib/waDeviceMonitor'
+import { getAllCryptoStats, getCryptoStatsTotals } from './lib/baileysTelemetry'
 
 const execAsync = promisify(exec)
 
@@ -192,6 +193,10 @@ app.get('/health', async (_req, res) => {
     disk,
     recentErrors,
     heartbeatFailures: getHeartbeatFailures(),
+    baileysCrypto: {
+      totals: getCryptoStatsTotals(),
+      perSession: getAllCryptoStats(),
+    },
   })
 })
 

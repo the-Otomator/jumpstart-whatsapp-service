@@ -1,6 +1,5 @@
 import makeWASocket, {
   DisconnectReason,
-  useMultiFileAuthState,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
   proto,
@@ -44,6 +43,23 @@ import {
   requireWebhookUrl,
   WEBHOOK_URL_REQUIRED,
 } from '../../lib/webhookUrl'
+import { useHardenedMultiFileAuthState } from '../../lib/hardenedMultiFileAuthState'
+import {
+  acquireSessionLock,
+  releaseSessionLock,
+  SessionLockError,
+} from '../../lib/sessionAuthLock'
+import {
+  getOutgoingMessage,
+  storeOutgoingMessage,
+} from '../../lib/outgoingMessageStore'
+import { MsgRetryCounterCache, MSG_RETRY_MAX_COUNT } from '../../lib/msgRetryCache'
+import {
+  recordDecryptFailure,
+  recordGetMessageHit,
+  recordGetMessageMiss,
+  recordRetryReceipt,
+} from '../../lib/baileysTelemetry'
 
 const baileysLogger = pino({ level: 'silent' })
 
@@ -91,6 +107,10 @@ export class BaileysProvider implements WhatsAppProvider {
   private keepaliveMisses = new Map<string, number>()
   /** Wall-clock ms when connection.update → open last fired (reconnect backfill window). */
   private lastOpenAtMs = new Map<string, number>()
+  /** Per-session retry counters (Baileys CacheStore). */
+  private msgRetryCaches = new Map<string, MsgRetryCounterCache>()
+  /** Orgs that currently hold the on-disk session lock in this process. */
+  private heldSessionLocks = new Set<string>()
 
   async start(orgId: string, webhookUrl?: string): Promise<void> {
     const log = orgLogger(orgId)
@@ -137,11 +157,32 @@ export class BaileysProvider implements WhatsAppProvider {
       autoRestore: true,
     })
 
+    // Cross-process single-writer: refuse if another live process holds the auth dir.
+    try {
+      acquireSessionLock(orgId)
+      this.heldSessionLocks.add(orgId)
+    } catch (err) {
+      if (err instanceof SessionLockError) {
+        session.status = 'disconnected'
+        session.lastError = err.message
+        log.error(
+          { holderPid: err.holder.pid, holderBootId: err.holder.bootId },
+          'Cannot start session — auth lock held by another process'
+        )
+      }
+      throw err
+    }
+
     const authDir = path.join(process.cwd(), 'sessions', orgId)
-    const { state, saveCreds } = await useMultiFileAuthState(authDir)
+    const { state, saveCreds } = await useHardenedMultiFileAuthState(authDir)
     const { version } = await fetchLatestBaileysVersion()
 
     log.info({ version }, 'Creating Baileys socket')
+
+    if (!this.msgRetryCaches.has(orgId)) {
+      this.msgRetryCaches.set(orgId, new MsgRetryCounterCache())
+    }
+    const msgRetryCounterCache = this.msgRetryCaches.get(orgId)!
 
     const sock = makeWASocket({
       version,
@@ -154,6 +195,29 @@ export class BaileysProvider implements WhatsAppProvider {
       generateHighQualityLinkPreview: false,
       // Baileys WS ping; our keepalive still probes readyState for silent half-open.
       keepAliveIntervalMs: 15_000,
+      // Cap retries for a poisoned message (Baileys default is also 5).
+      maxMsgRetryCount: MSG_RETRY_MAX_COUNT,
+      msgRetryCounterCache,
+      // Required for decrypt self-heal: recipient retry receipts call this to resend.
+      getMessage: async (key) => {
+        try {
+          recordRetryReceipt(orgId)
+          const stored = getOutgoingMessage(orgId, key)
+          if (stored) {
+            recordGetMessageHit(orgId)
+            return stored
+          }
+          recordGetMessageMiss(orgId)
+          log.warn(
+            { messageId: key.id, remoteJid: key.remoteJid },
+            'getMessage miss — cannot satisfy decrypt retry; recipient may stay stuck'
+          )
+          return undefined
+        } catch (err) {
+          log.warn({ err: (err as Error).message, messageId: key.id }, 'getMessage threw — returning undefined')
+          return undefined
+        }
+      },
     })
     this.sockets.set(orgId, sock)
 
@@ -258,6 +322,16 @@ export class BaileysProvider implements WhatsAppProvider {
       if (type !== 'notify') return
 
       for (const msg of messages) {
+        // Inbound decrypt failure ("Waiting for this message") surfaces as CIPHERTEXT stub.
+        if (msg.messageStubType === proto.WebMessageInfo.StubType.CIPHERTEXT) {
+          recordDecryptFailure(orgId)
+          log.warn(
+            { messageId: msg.key.id, from: msg.key.remoteJid },
+            'Inbound CIPHERTEXT stub — local decrypt failure'
+          )
+          continue
+        }
+
         if (!msg.message || msg.key.fromMe) continue
 
         const from = msg.key.remoteJid ?? ''
@@ -457,6 +531,11 @@ export class BaileysProvider implements WhatsAppProvider {
     sock?.end(undefined)
     this.sockets.delete(orgId)
     this.sessions.delete(orgId)
+    this.msgRetryCaches.delete(orgId)
+    if (this.heldSessionLocks.has(orgId)) {
+      releaseSessionLock(orgId)
+      this.heldSessionLocks.delete(orgId)
+    }
     if (purgeAuth) {
       deleteSessionAuthDir(orgId)
       log.info('Session stopped — all pairing data removed from disk')
@@ -493,10 +572,20 @@ export class BaileysProvider implements WhatsAppProvider {
     const jid = formatJid(req.to)
     const content = await buildMessageContent(req)
     const result = await withTimeout(
-      sock.sendMessage(jid, content) as Promise<{ key?: { id?: string | null } } | undefined>,
+      sock.sendMessage(jid, content) as Promise<
+        | { key?: { id?: string | null; remoteJid?: string | null }; message?: proto.IMessage | null }
+        | undefined
+      >,
       WA_SEND_TIMEOUT_MS,
       'send_timeout'
     )
+    // Persist for getMessage decrypt-retry self-heal (TTL ≥ 7 days).
+    if (result?.key?.id && result.message) {
+      storeOutgoingMessage(req.orgId, result.key, result.message)
+    } else if (result?.key?.id) {
+      // sendMessage sometimes omits .message on the return; store the content we sent.
+      storeOutgoingMessage(req.orgId, { id: result.key.id, remoteJid: jid }, contentAsProto(content))
+    }
     return { messageId: result?.key?.id ?? '' }
   }
 
@@ -781,6 +870,41 @@ function detectMediaType(
 function formatJid(phone: string): string {
   const clean = phone.replace(/[^0-9]/g, '')
   return clean.endsWith('@s.whatsapp.net') ? clean : `${clean}@s.whatsapp.net`
+}
+
+/** Best-effort map of AnyMessageContent → proto.IMessage for retry store fallback. */
+function contentAsProto(content: AnyMessageContent): proto.IMessage {
+  const c = content as Record<string, unknown>
+  if (typeof c.text === 'string') {
+    return { conversation: c.text }
+  }
+  if (c.image) {
+    return { imageMessage: { caption: typeof c.caption === 'string' ? c.caption : undefined } }
+  }
+  if (c.video) {
+    return { videoMessage: { caption: typeof c.caption === 'string' ? c.caption : undefined } }
+  }
+  if (c.audio) {
+    return { audioMessage: {} }
+  }
+  if (c.document) {
+    return {
+      documentMessage: {
+        caption: typeof c.caption === 'string' ? c.caption : undefined,
+        fileName: typeof c.fileName === 'string' ? c.fileName : undefined,
+      },
+    }
+  }
+  if (c.location && typeof c.location === 'object') {
+    const loc = c.location as { degreesLatitude?: number; degreesLongitude?: number }
+    return {
+      locationMessage: {
+        degreesLatitude: loc.degreesLatitude,
+        degreesLongitude: loc.degreesLongitude,
+      },
+    }
+  }
+  return { conversation: '' }
 }
 
 async function buildMessageContent(req: SendMessageRequest): Promise<AnyMessageContent> {
