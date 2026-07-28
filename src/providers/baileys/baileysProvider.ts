@@ -202,7 +202,7 @@ export class BaileysProvider implements WhatsAppProvider {
       getMessage: async (key) => {
         try {
           recordRetryReceipt(orgId)
-          const stored = getOutgoingMessage(orgId, key)
+          const stored = await getOutgoingMessage(orgId, key)
           if (stored) {
             recordGetMessageHit(orgId)
             return stored
@@ -580,11 +580,12 @@ export class BaileysProvider implements WhatsAppProvider {
       'send_timeout'
     )
     // Persist for getMessage decrypt-retry self-heal (TTL ≥ 7 days).
+    // Fire-and-forget: store never rejects; must not delay or fail the send.
     if (result?.key?.id && result.message) {
-      storeOutgoingMessage(req.orgId, result.key, result.message)
+      void storeOutgoingMessage(req.orgId, result.key, result.message)
     } else if (result?.key?.id) {
       // sendMessage sometimes omits .message on the return; store the content we sent.
-      storeOutgoingMessage(req.orgId, { id: result.key.id, remoteJid: jid }, contentAsProto(content))
+      void storeOutgoingMessage(req.orgId, { id: result.key.id, remoteJid: jid }, contentAsProto(content))
     }
     return { messageId: result?.key?.id ?? '' }
   }

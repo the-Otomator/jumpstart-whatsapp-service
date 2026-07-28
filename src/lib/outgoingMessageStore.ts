@@ -2,7 +2,7 @@
  * Per-session store of outgoing Baileys message content for getMessage retries.
  * Disk-backed under sessions/<orgId>/outgoing/ so restarts can still satisfy retries.
  */
-import fs from 'fs'
+import { promises as fsp } from 'fs'
 import path from 'path'
 import type { proto } from '@whiskeysockets/baileys'
 import { logger } from './logger'
@@ -11,6 +11,14 @@ import { logger } from './logger'
 export const OUTGOING_MSG_TTL_MS = 7 * 24 * 60 * 60 * 1000
 /** Hard cap per session — oldest entries evicted when exceeded. */
 export const OUTGOING_MSG_MAX_PER_SESSION = 5_000
+/**
+ * Run enforceBound every N successful stores (amortised), not on every write.
+ * Worst-case overshoot above the cap: OUTGOING_MSG_ENFORCE_EVERY - 1 entries
+ * (plus the write that triggers the next enforce).
+ */
+export const OUTGOING_MSG_ENFORCE_EVERY = 100
+/** Drop crash-orphaned `.tmp` files older than this during eviction. */
+export const OUTGOING_TMP_ORPHAN_MAX_AGE_MS = 5 * 60 * 1000
 
 export interface StoredOutgoingMessage {
   remoteJid: string
@@ -19,6 +27,9 @@ export interface StoredOutgoingMessage {
 }
 
 const SESSIONS_DIR = (): string => path.join(process.cwd(), 'sessions')
+
+/** Per-org store counter for amortised eviction. */
+const storeCounts = new Map<string, number>()
 
 function storeDir(orgId: string): string {
   return path.join(SESSIONS_DIR(), orgId, 'outgoing')
@@ -30,36 +41,43 @@ function entryPath(orgId: string, messageId: string): string {
   return path.join(storeDir(orgId), `${safe}.json`)
 }
 
-function ensureDir(orgId: string): void {
-  const dir = storeDir(orgId)
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+async function ensureDir(orgId: string): Promise<void> {
+  await fsp.mkdir(storeDir(orgId), { recursive: true })
 }
 
 function isExpired(storedAt: number, now = Date.now()): boolean {
   return now - storedAt > OUTGOING_MSG_TTL_MS
 }
 
-/** Persist an outgoing message for later getMessage lookup. */
-export function storeOutgoingMessage(
+/**
+ * Persist an outgoing message for later getMessage lookup.
+ * Never rejects — failures are logged and swallowed so sends are not failed.
+ */
+export async function storeOutgoingMessage(
   orgId: string,
   key: { id?: string | null; remoteJid?: string | null },
   message: proto.IMessage | null | undefined
-): void {
+): Promise<void> {
   const id = key.id
   if (!id || !message) return
 
   try {
-    ensureDir(orgId)
+    await ensureDir(orgId)
     const entry: StoredOutgoingMessage = {
       remoteJid: key.remoteJid ?? '',
       message,
       storedAt: Date.now(),
     }
-    const tmp = `${entryPath(orgId, id)}.tmp`
     const finalPath = entryPath(orgId, id)
-    fs.writeFileSync(tmp, JSON.stringify(entry), 'utf-8')
-    fs.renameSync(tmp, finalPath)
-    enforceBound(orgId)
+    const tmp = `${finalPath}.tmp`
+    await fsp.writeFile(tmp, JSON.stringify(entry), 'utf-8')
+    await fsp.rename(tmp, finalPath)
+
+    const n = (storeCounts.get(orgId) ?? 0) + 1
+    storeCounts.set(orgId, n)
+    if (n % OUTGOING_MSG_ENFORCE_EVERY === 0) {
+      await enforceBound(orgId)
+    }
   } catch (err) {
     logger.warn({ orgId, messageId: id, err }, 'Failed to store outgoing message for retry')
   }
@@ -69,21 +87,28 @@ export function storeOutgoingMessage(
  * Look up stored content for a WAMessageKey.
  * Returns undefined on miss / expiry / error — never throws.
  */
-export function getOutgoingMessage(
+export async function getOutgoingMessage(
   orgId: string,
   key: proto.IMessageKey
-): proto.IMessage | undefined {
+): Promise<proto.IMessage | undefined> {
   try {
     const id = key.id
     if (!id) return undefined
     const filePath = entryPath(orgId, id)
-    if (!fs.existsSync(filePath)) return undefined
 
-    const raw = fs.readFileSync(filePath, 'utf-8')
+    let raw: string
+    try {
+      raw = await fsp.readFile(filePath, 'utf-8')
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'ENOENT') return undefined
+      throw err
+    }
+
     const entry = JSON.parse(raw) as StoredOutgoingMessage
     if (isExpired(entry.storedAt)) {
       try {
-        fs.unlinkSync(filePath)
+        await fsp.unlink(filePath)
       } catch {
         // best-effort
       }
@@ -99,52 +124,91 @@ export function getOutgoingMessage(
   }
 }
 
-/** Drop expired files and, if over cap, delete oldest first. */
-export function enforceBound(orgId: string): void {
+/**
+ * Drop expired files and, if over cap, delete oldest first.
+ *
+ * Age / eviction order use filesystem mtime (mtimeMs), not JSON content.
+ * Writes go through tmp + rename, so mtime is set at rename and tracks
+ * `storedAt` closely enough for TTL and oldest-first eviction — do not
+ * reintroduce readFile + JSON.parse here.
+ */
+export async function enforceBound(orgId: string): Promise<void> {
   const dir = storeDir(orgId)
-  if (!fs.existsSync(dir)) return
+  let names: string[]
+  try {
+    names = await fsp.readdir(dir)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw err
+  }
 
   const now = Date.now()
-  type EntryMeta = { name: string; storedAt: number; full: string }
+  type EntryMeta = { name: string; mtimeMs: number; full: string }
   const metas: EntryMeta[] = []
 
-  for (const name of fs.readdirSync(dir)) {
-    if (!name.endsWith('.json')) continue
-    const full = path.join(dir, name)
-    try {
-      const raw = fs.readFileSync(full, 'utf-8')
-      const entry = JSON.parse(raw) as StoredOutgoingMessage
-      if (isExpired(entry.storedAt, now)) {
-        fs.unlinkSync(full)
-        continue
+  await Promise.all(
+    names.map(async (name) => {
+      const full = path.join(dir, name)
+
+      if (name.endsWith('.tmp')) {
+        try {
+          const st = await fsp.stat(full)
+          if (now - st.mtimeMs > OUTGOING_TMP_ORPHAN_MAX_AGE_MS) {
+            await fsp.unlink(full)
+          }
+        } catch {
+          // ignore
+        }
+        return
       }
-      metas.push({ name, storedAt: entry.storedAt, full })
-    } catch {
+
+      if (!name.endsWith('.json')) return
+
       try {
-        fs.unlinkSync(full)
+        const st = await fsp.stat(full)
+        // mtimeMs ≈ storedAt (set at atomic rename after write) — see module comment above.
+        if (isExpired(st.mtimeMs, now)) {
+          await fsp.unlink(full)
+          return
+        }
+        metas.push({ name, mtimeMs: st.mtimeMs, full })
       } catch {
-        // ignore
+        try {
+          await fsp.unlink(full)
+        } catch {
+          // ignore
+        }
       }
-    }
-  }
+    })
+  )
 
   if (metas.length <= OUTGOING_MSG_MAX_PER_SESSION) return
 
-  metas.sort((a, b) => a.storedAt - b.storedAt)
+  metas.sort((a, b) => a.mtimeMs - b.mtimeMs)
   const toRemove = metas.length - OUTGOING_MSG_MAX_PER_SESSION
-  for (let i = 0; i < toRemove; i++) {
-    try {
-      fs.unlinkSync(metas[i].full)
-    } catch {
-      // ignore
-    }
-  }
+  await Promise.all(
+    metas.slice(0, toRemove).map(async (meta) => {
+      try {
+        await fsp.unlink(meta.full)
+      } catch {
+        // ignore
+      }
+    })
+  )
 }
 
 /** Test helper: wipe a session's outgoing store. */
-export function clearOutgoingMessageStore(orgId: string): void {
+export async function clearOutgoingMessageStore(orgId: string): Promise<void> {
+  storeCounts.delete(orgId)
   const dir = storeDir(orgId)
-  if (fs.existsSync(dir)) {
-    fs.rmSync(dir, { recursive: true, force: true })
+  try {
+    await fsp.rm(dir, { recursive: true, force: true })
+  } catch {
+    // ignore
   }
+}
+
+/** Test helper: reset amortisation counter without wiping files. */
+export function resetStoreCountForTests(orgId: string): void {
+  storeCounts.delete(orgId)
 }
