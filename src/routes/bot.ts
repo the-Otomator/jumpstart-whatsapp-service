@@ -33,7 +33,7 @@ router.post('/process', async (req: Request, res: Response) => {
   }
 
   try {
-    const botRunId = await processBotMessage({
+    const result = await processBotMessage({
       organizationId,
       tenantUrl,
       tenantServiceKey,
@@ -46,7 +46,12 @@ router.post('/process', async (req: Request, res: Response) => {
       systemPrompt: body.systemPrompt,
       maxHistoryMessages: body.maxHistoryMessages,
     })
-    res.json({ ok: true, botRunId })
+    res.json({
+      ok: true,
+      botRunId: result.runId,
+      replyText: result.replyText,
+      messageId: result.waMessageId,
+    })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     logger.error({ err: msg, conversationId }, 'POST /api/bot/process failed')

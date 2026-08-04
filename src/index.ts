@@ -18,6 +18,7 @@ import metaWebhookRoutes from './routes/meta-webhook'
 import metaWebhooksRouter from './routes/webhooks'
 import templatesRouter from './routes/templates'
 import botRoutes from './routes/bot'
+import mediaRoutes from './routes/media'
 import { listActiveSessions, restoreSessions } from './sessionManager'
 import { logger } from './lib/logger'
 import { requestIdMiddleware } from './middleware/requestId'
@@ -28,6 +29,10 @@ import {
   getHeartbeatFailures,
 } from './lib/waDeviceMonitor'
 import { getAllCryptoStats, getCryptoStatsTotals } from './lib/baileysTelemetry'
+import {
+  startMediaPruneScheduler,
+  stopMediaPruneScheduler,
+} from './lib/mediaCache'
 
 const execAsync = promisify(exec)
 
@@ -218,6 +223,7 @@ app.use('/api/groups', groupRoutes)
 app.use('/api/contacts', contactRoutes)
 app.use('/api/templates', templatesRouter)
 app.use('/api/bot', botRoutes)
+app.use('/api/media', mediaRoutes)
 
 // Global error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -240,7 +246,13 @@ const server = app.listen(PORT, async () => {
   }
 
   startWaDeviceMonitor()
+  startMediaPruneScheduler()
 })
 
 // Graceful shutdown
-setupGracefulShutdown(server, { onShutdown: stopWaDeviceMonitor })
+setupGracefulShutdown(server, {
+  onShutdown: () => {
+    stopWaDeviceMonitor()
+    stopMediaPruneScheduler()
+  },
+})
