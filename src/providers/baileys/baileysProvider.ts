@@ -5,6 +5,11 @@ import makeWASocket, {
   proto,
   AnyMessageContent,
 } from '@whiskeysockets/baileys'
+import {
+  cacheInboundMedia,
+  publicMediaUrl,
+  type MediaType,
+} from '../../lib/mediaCache'
 import { Boom } from '@hapi/boom'
 import QRCode from 'qrcode'
 import path from 'path'
@@ -453,6 +458,32 @@ export class BaileysProvider implements WhatsAppProvider {
         }
         if (mediaType) {
           payload.mediaType = mediaType
+          // Download now — Baileys media URLs are not fetchable later (keys on message).
+          // Failure must never block the webhook.
+          try {
+            const messageId = msg.key.id ?? ''
+            const cached = await cacheInboundMedia({
+              orgId,
+              messageId,
+              mediaType: mediaType as MediaType,
+              waMessage: msg,
+            })
+            if (cached.mime) payload.mediaMime = cached.mime
+            if (cached.size != null) payload.mediaSize = cached.size
+            if (cached.filename) payload.mediaFilename = cached.filename
+            if (cached.tooLarge) payload.mediaTooLarge = true
+            if (cached.filePath && messageId) {
+              payload.mediaUrl = publicMediaUrl(orgId, messageId)
+            } else if (cached.mime || cached.filename || cached.tooLarge) {
+              // Metadata-only (too large or download failed) — no fetchable URL
+              if (cached.tooLarge) payload.mediaTooLarge = true
+            }
+          } catch (err) {
+            log.warn(
+              { orgId, messageId: msg.key.id, err: (err as Error).message },
+              'Media capture error — continuing without media'
+            )
+          }
         }
 
         log.debug(

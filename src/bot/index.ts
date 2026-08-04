@@ -8,7 +8,13 @@ import { sendWhatsAppMessage } from '../routes/messages'
 
 const DEFAULT_HISTORY_LIMIT = 10
 
-export async function processBotMessage(req: BotProcessRequest): Promise<string> {
+export type BotProcessResult = {
+  runId: string
+  replyText: string
+  waMessageId: string | null
+}
+
+export async function processBotMessage(req: BotProcessRequest): Promise<BotProcessResult> {
   const log = logger.child({ org: req.organizationId, conv: req.conversationId })
   const tenant = createTenantClient(req.tenantUrl, req.tenantServiceKey)
 
@@ -58,20 +64,26 @@ export async function processBotMessage(req: BotProcessRequest): Promise<string>
       log.warn({ runId }, 'Gemini returned empty response, using fallback')
     }
 
-    await sendWhatsAppMessage({
+    const waMessageId = await sendWhatsAppMessage({
       orgId: req.orgIdOnDevice,
       to: req.contactPhone.replace(/^\+/, ''),
       type: 'text',
       message: replyText,
     })
-    log.info({ runId, to: req.contactPhone }, 'Bot reply sent via WA')
+    log.info({ runId, to: req.contactPhone, waMessageId }, 'Bot reply sent via WA')
 
+    // Full row so required columns (device_id, etc.) succeed. Edge logMessage from
+    // the gateway is preferred once Part B deploys; this is fail-open dual coverage.
     const { error: insertErr } = await tenant.from('wa_messages').insert({
       organization_id: req.organizationId,
       conversation_id: req.conversationId,
+      device_id: req.deviceId,
       direction: 'out',
       body: replyText,
-      bot_run_id: runId,
+      message_type: 'text',
+      status: 'sent',
+      wa_message_id: waMessageId ?? null,
+      timestamp: new Date().toISOString(),
     })
     if (insertErr) log.error({ insertErr }, 'Failed to insert outbound wa_messages row')
 
@@ -81,7 +93,7 @@ export async function processBotMessage(req: BotProcessRequest): Promise<string>
       toolCalls: toolCallResults.length > 0 ? toolCallResults : undefined,
     })
 
-    return runId
+    return { runId, replyText, waMessageId: waMessageId ?? null }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     log.error({ runId, err: msg }, 'Bot processing failed')
