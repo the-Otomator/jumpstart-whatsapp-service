@@ -33,6 +33,7 @@ import {
   startMediaPruneScheduler,
   stopMediaPruneScheduler,
 } from './lib/mediaCache'
+import { startWebhookAudit, stopWebhookAudit } from './lib/webhookAudit'
 
 const execAsync = promisify(exec)
 
@@ -247,6 +248,7 @@ const server = app.listen(PORT, async () => {
 
   startWaDeviceMonitor()
   startMediaPruneScheduler()
+  startWebhookAudit()
 })
 
 // Graceful shutdown
@@ -254,5 +256,6 @@ setupGracefulShutdown(server, {
   onShutdown: () => {
     stopWaDeviceMonitor()
     stopMediaPruneScheduler()
+    stopWebhookAudit()
   },
 })

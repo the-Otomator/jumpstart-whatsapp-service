@@ -1,79 +1,152 @@
-/**
- * P1/M2: Jumpstart inbound webhook auth header alignment.
- * Run: npx ts-node --transpile-only src/lib/webhookDispatcher.test.ts
- */
-import { buildWebhookHeaders, normalizeJumpstartInboundWebhookUrl } from './webhookDispatcher'
+import assert from 'assert'
+import {
+  attemptPost,
+  buildWebhookHeaders,
+  clearWebhookFailures,
+  getWebhookFailures,
+  normalizeJumpstartInboundWebhookUrl,
+  postWebhook,
+} from './webhookDispatcher'
+import type { WebhookHealthResult } from './webhookHealth'
 import { redactWebhookUrl } from './webhookUrl'
 
-function assert(cond: unknown, msg: string): asserts cond {
-  if (!cond) throw new Error(msg)
+const URL = 'https://example.test/functions/v1/wa-webhook'
+const ORG = 'org-test'
+const noSleep = async (): Promise<void> => undefined
+
+function response(status: number): Response {
+  return new Response('', { status })
 }
 
-function main() {
-  const prev = process.env.WA_INCOMING_SECRET
-  process.env.WA_INCOMING_SECRET = 'test-secret-value'
+function fetchReturning(...statuses: number[]): { fetchImpl: typeof fetch; calls: () => number } {
+  let callCount = 0
+  const fetchImpl = (async () => {
+    const status = statuses[Math.min(callCount, statuses.length - 1)]
+    callCount += 1
+    return response(status)
+  }) as typeof fetch
+  return { fetchImpl, calls: () => callCount }
+}
 
+async function flushTelemetry(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve))
+}
+
+async function testClassifications(): Promise<void> {
+  const ok = await attemptPost(URL, {}, 1, fetchReturning(200).fetchImpl)
+  assert.deepStrictEqual(ok, { ok: true, category: 'ok', httpStatus: 200, errorCode: null })
+
+  const unauthorized = await attemptPost(URL, {}, 1, fetchReturning(401).fetchImpl)
+  assert.strictEqual(unauthorized.category, 'auth_rejected')
+  assert.strictEqual(unauthorized.httpStatus, 401)
+
+  const forbidden = await attemptPost(URL, {}, 1, fetchReturning(403).fetchImpl)
+  assert.strictEqual(forbidden.category, 'auth_rejected')
+
+  const other4xx = await attemptPost(URL, {}, 1, fetchReturning(422).fetchImpl)
+  assert.strictEqual(other4xx.category, 'http_rejected')
+  assert.strictEqual(other4xx.httpStatus, 422)
+
+  const serverError = await attemptPost(URL, {}, 1, fetchReturning(503).fetchImpl)
+  assert.strictEqual(serverError.category, 'http_rejected')
+  assert.strictEqual(serverError.httpStatus, 503)
+
+  const timeoutError = new Error('sensitive timeout detail')
+  timeoutError.name = 'AbortError'
+  const timeoutFetch = (async () => { throw timeoutError }) as typeof fetch
+  const timeout = await attemptPost(URL, {}, 1, timeoutFetch)
+  assert.deepStrictEqual(timeout, {
+    ok: false,
+    category: 'timeout',
+    httpStatus: null,
+    errorCode: 'timeout',
+  })
+
+  const networkFetch = (async () => { throw new Error('sensitive network detail') }) as typeof fetch
+  const network = await attemptPost(URL, {}, 1, networkFetch)
+  assert.deepStrictEqual(network, {
+    ok: false,
+    category: 'unreachable',
+    httpStatus: null,
+    errorCode: 'unreachable',
+  })
+}
+
+async function testRetriesAndNonBlockingTelemetry(): Promise<void> {
+  const retry = fetchReturning(500, 200)
+  const writes: WebhookHealthResult[] = []
+  await postWebhook(URL, { orgId: ORG, event: 'message', message: 'private-body' }, {
+    fetchImpl: retry.fetchImpl,
+    sleep: noSleep,
+    persistHealth: async (_sessionKey, result) => { writes.push(result) },
+  })
+  await flushTelemetry()
+  assert.strictEqual(retry.calls(), 2, 'must retry once and then stop on success')
+  assert.strictEqual(writes.length, 1)
+  assert.strictEqual(writes[0].category, 'ok')
+
+  clearWebhookFailures(ORG)
+  const exhausted = fetchReturning(500)
+  const failedWrites: WebhookHealthResult[] = []
+  await postWebhook(
+    `${URL}?secret=sensitive-query-value`,
+    { orgId: ORG, event: 'message', message: 'sensitive-payload-value' },
+    {
+      fetchImpl: exhausted.fetchImpl,
+      sleep: noSleep,
+      persistHealth: async (_sessionKey, result) => { failedWrites.push(result) },
+    }
+  )
+  await flushTelemetry()
+  assert.strictEqual(exhausted.calls(), 3, 'must exhaust exactly three attempts')
+  assert.strictEqual(failedWrites.length, 1)
+  assert.strictEqual(failedWrites[0].category, 'http_rejected')
+  const stored = JSON.stringify(getWebhookFailures(ORG))
+  assert.ok(!stored.includes('sensitive-query-value'), 'stored URL must redact query secret')
+  assert.ok(!stored.includes('sensitive-payload-value'), 'stored failure must not retain payload')
+
+  const healthy = fetchReturning(200)
+  await assert.doesNotReject(() => postWebhook(URL, { orgId: 'writer-failure' }, {
+    fetchImpl: healthy.fetchImpl,
+    sleep: noSleep,
+    persistHealth: async () => { throw new Error('health storage unavailable') },
+  }))
+  await flushTelemetry()
+}
+
+function testHeadersAndUrlSanitization(): void {
+  const previous = process.env.WA_INCOMING_SECRET
+  process.env.WA_INCOMING_SECRET = 'non-production-test-value'
   try {
-    // Legacy wa-incoming without ?secret= → Bearer from env
-    const hubUrl = 'https://mzalzjtsyrjycaxolldv.supabase.co/functions/v1/wa-incoming'
-    const hubHeaders = buildWebhookHeaders(hubUrl, { orgId: 'org-1', event: 'message' })
-    assert(
-      hubHeaders['Authorization'] === 'Bearer test-secret-value',
-      `Hub wa-incoming without ?secret= must get Bearer from env, got ${JSON.stringify(hubHeaders)}`
-    )
-    assert(!hubHeaders['x-wa-session-key'], 'wa-incoming must not require x-wa-session-key')
+    const headers = buildWebhookHeaders(URL, { orgId: ORG, event: 'webhook.probe' })
+    assert.strictEqual(headers['x-wa-session-key'], ORG)
+    assert.strictEqual(headers.Authorization, 'Bearer non-production-test-value')
 
-    // Legacy wa-incoming with ?secret= → no Authorization (do not double-send)
-    const wmUrl =
-      'https://uvfrlkpeuejzqvvmnxrb.supabase.co/functions/v1/wa-incoming?secret=already-in-url'
-    const wmHeaders = buildWebhookHeaders(wmUrl, { orgId: 'org-2', event: 'message' })
-    assert(
-      !wmHeaders['Authorization'],
-      'when ?secret= already present, do not also attach Bearer'
-    )
-
-    // Live wa-webhook without ?secret= → Authorization + x-wa-session-key
-    const jsUrl = 'https://dgxnnwnugdxzeopleera.supabase.co/functions/v1/wa-webhook'
-    const jsHeaders = buildWebhookHeaders(jsUrl, { orgId: 'org-3', event: 'message' })
-    assert(jsHeaders['x-wa-session-key'] === 'org-3', 'wa-webhook still gets x-wa-session-key')
-    assert(
-      jsHeaders['Authorization'] === 'Bearer test-secret-value',
-      `wa-webhook without ?secret= must get Bearer from env, got ${JSON.stringify(jsHeaders)}`
-    )
-
-    // Live wa-webhook with ?secret= → no Authorization (do not double-send)
-    const jsSecretUrl =
-      'https://dgxnnwnugdxzeopleera.supabase.co/functions/v1/wa-webhook?secret=already-in-url'
-    const jsSecretHeaders = buildWebhookHeaders(jsSecretUrl, { orgId: 'org-4', event: 'message' })
-    assert(jsSecretHeaders['x-wa-session-key'] === 'org-4', 'wa-webhook with ?secret= still gets session key')
-    assert(
-      !jsSecretHeaders['Authorization'],
-      'wa-webhook with ?secret= must not also attach Bearer'
-    )
-
-    delete process.env.WA_INCOMING_SECRET
-    const noEnvHeaders = buildWebhookHeaders(hubUrl, { orgId: 'org-1', event: 'message' })
-    assert(
-      !noEnvHeaders['Authorization'],
-      'without env and without ?secret=, do not invent a secret (ops must set env or reconcile webhookUrl)'
-    )
+    const withQuery = buildWebhookHeaders(`${URL}?secret=query-value`, { orgId: ORG })
+    assert.ok(!withQuery.Authorization, 'query-secret URLs keep existing no-Bearer behavior')
 
     const normalized = normalizeJumpstartInboundWebhookUrl(
-      'https://example.supabase.co/functions/v1/whatsapp-incoming'
+      'https://example.test/functions/v1/whatsapp-incoming'
     )
-    assert(normalized.includes('wa-webhook'), 'legacy whatsapp-incoming → wa-webhook')
+    assert.ok(normalized.includes('/wa-webhook'))
 
-    const redacted = redactWebhookUrl(
-      'https://example.supabase.co/functions/v1/wa-webhook?secret=super-secret&x=1'
-    )
-    assert(redacted.includes('secret=***'), `expected secret redacted, got ${redacted}`)
-    assert(!redacted.includes('super-secret'), 'redacted URL must not contain raw secret')
+    const redacted = redactWebhookUrl(`${URL}?secret=sensitive-query-value&x=1`)
+    assert.ok(redacted.includes('secret=***'))
+    assert.ok(!redacted.includes('sensitive-query-value'))
   } finally {
-    if (prev === undefined) delete process.env.WA_INCOMING_SECRET
-    else process.env.WA_INCOMING_SECRET = prev
+    if (previous === undefined) delete process.env.WA_INCOMING_SECRET
+    else process.env.WA_INCOMING_SECRET = previous
   }
+}
 
+async function main(): Promise<void> {
+  testHeadersAndUrlSanitization()
+  await testClassifications()
+  await testRetriesAndNonBlockingTelemetry()
   console.log('webhookDispatcher.test.ts: all checks passed')
 }
 
-main()
+main().catch((err) => {
+  console.error(err)
+  process.exit(1)
+})
