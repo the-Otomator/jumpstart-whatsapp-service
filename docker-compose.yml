@@ -6,6 +6,11 @@ services:
         GIT_SHA: ${GIT_SHA:-unknown}
         GIT_BRANCH: ${GIT_BRANCH:-unknown}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "10"
     ports:
       - "127.0.0.1:${PORT:-3001}:3001"
     env_file:
