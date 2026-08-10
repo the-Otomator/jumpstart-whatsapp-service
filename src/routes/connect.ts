@@ -2,6 +2,8 @@
 import { getQR, getStatus, startSession, stopSession } from '../sessionManager'
 import { orgLogger } from '../lib/logger'
 import { validateOrg } from '../lib/supabase'
+import { resolveJumpstartWebhookUrl } from '../lib/jumpstartSupabase'
+import { isValidWebhookUrl } from '../lib/webhookUrl'
 
 const router = Router()
 
@@ -46,11 +48,23 @@ router.get('/:orgId', async (req: Request, res: Response) => {
   if (!status || status.status === 'disconnected') {
     log.info({ prevStatus: status?.status ?? 'none' }, 'Auto-starting session from connect page')
     try {
+      // Never accept a caller-controlled webhook on this public route. Reuse
+      // the live target or resolve Jumpstart's fixed target from its device row.
+      const webhookUrl = isValidWebhookUrl(status?.webhookUrl)
+        ? status.webhookUrl
+        : await resolveJumpstartWebhookUrl(orgId)
+
+      if (!webhookUrl) {
+        log.error('Cannot auto-start session: no trusted webhook target found')
+        res.send(renderConnectPage(orgId))
+        return
+      }
+
       if (status?.status === 'disconnected') {
         stopSession(orgId, { purgeAuthDir: true })
         await new Promise((r) => setTimeout(r, 500))
       }
-      await startSession(orgId)
+      await startSession(orgId, webhookUrl)
     } catch (err) {
       log.error({ err }, 'Failed to auto-start session from connect page')
     }
