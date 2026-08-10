@@ -17,6 +17,9 @@ Since commit `35dd899`, `startSession` intentionally fails closed with
   - Added `resolveJumpstartWebhookUrl(sessionKey)`.
   - It returns Jumpstart's canonical `wa-webhook` URL only when the exact
     `session_key` already exists in Jumpstart `wa_devices`.
+  - Legacy purchase links are also accepted only when an exact Hub Baileys row
+    exists, its key is derived from that row's org UUID, and that organization
+    exists in Jumpstart.
   - Missing configuration, missing rows, and query failures return `null`.
 - `src/routes/connect.ts`
   - Reuses a valid webhook from an existing disconnected session.
@@ -42,9 +45,9 @@ Local isolated worktree from `origin/master`:
 ## Known limitations
 
 - The fix is local only. The live URL will remain unchanged until deployment.
-- Recovery is intentionally limited to registered Jumpstart `wa_devices` rows.
-  Other partner flows must start sessions through their authenticated API flow
-  with their own trusted webhook target.
+- Recovery is intentionally limited to registered Jumpstart devices or
+  strictly verified legacy Jumpstart Hub links. Other partner flows must start
+  sessions through their authenticated API flow with their own trusted target.
 - Browser automation could not attach in this Windows session (`process`
   bootstrap conflict), so live reproduction used the supplied screenshot plus
   source/contract inspection. No production write was performed.

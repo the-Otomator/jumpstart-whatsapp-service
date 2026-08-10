@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { logger } from './logger'
+import { supabase as hubSupabase } from './supabase'
 
 /**
  * Jumpstart platform Supabase (dgxnnwnugdxzeopleera) — owns `public.wa_devices`.
@@ -24,7 +25,8 @@ export const jumpstartSupabase: SupabaseClient | null = JUMPSTART_KEY
 /** Resolve the fixed Jumpstart webhook only for a registered device session. */
 export async function resolveJumpstartWebhookUrl(
   sessionKey: string,
-  client: SupabaseClient | null = jumpstartSupabase
+  client: SupabaseClient | null = jumpstartSupabase,
+  hubClient: SupabaseClient | null = hubSupabase
 ): Promise<string | null> {
   if (!client) return null
 
@@ -38,7 +40,39 @@ export async function resolveJumpstartWebhookUrl(
     logger.warn({ sessionKey, err: error.message }, 'Failed to resolve Jumpstart webhook')
     return null
   }
-  if (!data?.session_key) return null
+  if (data?.session_key) return `${JUMPSTART_URL}/functions/v1/wa-webhook`
+
+  // Legacy Jumpstart purchase links were registered only in the Hub table.
+  // Require an exact Hub row, a session key derived from its org UUID, and an
+  // existing Jumpstart organization before assigning Jumpstart's webhook.
+  if (!hubClient) return null
+  const { data: hubDevice, error: hubError } = await hubClient
+    .from('whatsapp_devices')
+    .select('org_id, session_key, provider')
+    .eq('session_key', sessionKey)
+    .maybeSingle()
+
+  if (hubError) {
+    logger.warn({ sessionKey, err: hubError.message }, 'Failed to resolve legacy Hub device')
+    return null
+  }
+
+  const orgId = typeof hubDevice?.org_id === 'string' ? hubDevice.org_id : ''
+  const isDerivedKey =
+    sessionKey.startsWith(`${orgId}-`) || sessionKey.startsWith(`${orgId}__`)
+  if (!orgId || hubDevice?.provider !== 'baileys' || !isDerivedKey) return null
+
+  const { data: organization, error: orgError } = await client
+    .from('organizations')
+    .select('id')
+    .eq('id', orgId)
+    .maybeSingle()
+
+  if (orgError) {
+    logger.warn({ sessionKey, orgId, err: orgError.message }, 'Failed to verify Jumpstart org')
+    return null
+  }
+  if (!organization?.id) return null
 
   return `${JUMPSTART_URL}/functions/v1/wa-webhook`
 }
