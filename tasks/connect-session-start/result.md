@@ -41,18 +41,24 @@ Local isolated worktree from `origin/master`:
 - `..\..\node_modules\.bin\tsc.cmd --noEmit` — exit 0.
 - `npm test` — exit 0, including the new resolver test and the existing suite.
 - `git diff --check` — exit 0 (line-ending warnings only).
+- Production deployment built and recreated the container successfully.
+- Live `/health` returned `status=ok`, `gitSha=a86b7aa`, and
+  `gitBranch=codex/fix-connect-session-start`.
+- Opening the supplied production connect URL and polling its status returned
+  `status=qr` with a QR payload present. The QR payload was not printed or saved.
 
 ## Known limitations
 
-- The fix is local only. The live URL will remain unchanged until deployment.
 - Recovery is intentionally limited to registered Jumpstart devices or
   strictly verified legacy Jumpstart Hub links. Other partner flows must start
   sessions through their authenticated API flow with their own trusted target.
 - Browser automation could not attach in this Windows session (`process`
   bootstrap conflict), so live reproduction used the supplied screenshot plus
-  source/contract inspection. No production write was performed.
+  source/contract inspection. Live verification used HTTPS status responses.
 
-## Approval-blocked operations
+## Production actions
 
-No commit, push, pull request, deployment, production restart, credential use,
-or production session start was performed. Each requires explicit authorization.
+After explicit approval, commits `af34086` and `a86b7aa` were pushed and
+`a86b7aa` was deployed to `/opt/whatsapp-service`. The deployment recreated the
+service container and opening the authorized connect URL started its QR session.
+No pull request or merge was performed.
