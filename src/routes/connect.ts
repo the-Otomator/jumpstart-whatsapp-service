@@ -92,6 +92,11 @@ function renderConnectPage(orgId: string): string {
     }
     .qr-container img { width: 256px; height: 256px; display: block; }
     .connected-icon { font-size: 64px; margin: 16px 0; }
+    .success-panel {
+      margin-top: 16px; padding: 16px; border: 1px solid #235c38;
+      border-radius: 12px; background: #102419; color: #bbf7d0;
+      font-size: 14px; line-height: 1.7;
+    }
     .phone-number {
       font-size: 20px; font-weight: 600; color: #4ade80;
       font-family: monospace; direction: ltr;
@@ -119,8 +124,8 @@ function renderConnectPage(orgId: string): string {
 <body>
   <div class="card">
     <div class="logo">&#128242;</div>
-    <h1>Connect WhatsApp</h1>
-    <div class="org-badge">${orgId}</div>
+    <h1>חיבור WhatsApp</h1>
+    <div class="org-badge">חיבור מאובטח</div>
 
     <div id="state-loading" class="state active">
       <div class="spinner"></div>
@@ -142,17 +147,19 @@ function renderConnectPage(orgId: string): string {
 
     <div id="state-connecting" class="state">
       <div class="spinner"></div>
-      <p style="color:#aaa;">╫₧╫í╫á╫¢╫¿╫ƒ ╫ó╫¥ WhatsAppΓÇª ╫á╫É ╫£╫ö╫₧╫¬╫Ö╫ƒ</p>
-      <p style="color:#666;font-size:12px;margin-top:8px;" dir="ltr">Syncing with WhatsAppΓÇª please wait</p>
+      <h2 style="margin-bottom:8px;">הקוד נקלט</h2>
+      <p style="color:#aaa;">משלימים את החיבור ל־WhatsApp, זה עשוי לקחת מספר שניות.</p>
+      <p style="color:#666;font-size:12px;margin-top:8px;" dir="ltr">Finishing WhatsApp connection…</p>
     </div>
 
     <div id="state-connected" class="state">
       <div class="connected-icon">&#9989;</div>
-      <h2 style="margin-bottom:8px;">Connected!</h2>
+      <h2 style="margin-bottom:8px;">החיבור הצליח!</h2>
       <p class="phone-number" id="phone-display"></p>
-      <p style="color:#888;margin-top:12px;font-size:14px;">
-        WhatsApp connected successfully. You can close this page.
-      </p>
+      <div class="success-panel">
+        המכשיר מחובר כעת ל־JumpStart וניתן להתחיל לעבוד.<br>
+        אפשר לסגור את החלון ולחזור למערכת.
+      </div>
     </div>
 
     <div id="state-disconnected" class="state">
@@ -175,6 +182,8 @@ function renderConnectPage(orgId: string): string {
     var currentState = 'loading';
     var pollInterval;
     var notFoundCount = 0;
+    var sawQr = false;
+    var postQrDisconnectCount = 0;
 
     function setState(state) {
       if (state === currentState) return;
@@ -191,11 +200,14 @@ function renderConnectPage(orgId: string): string {
           switch (data.status) {
             case 'qr':
               notFoundCount = 0;
+              sawQr = true;
+              postQrDisconnectCount = 0;
               setState('qr');
               if (data.qr) document.getElementById('qr-image').src = data.qr;
               break;
             case 'connecting':
               notFoundCount = 0;
+              postQrDisconnectCount = 0;
               setState('connecting');
               break;
             case 'connected':
@@ -206,8 +218,16 @@ function renderConnectPage(orgId: string): string {
               clearInterval(pollInterval);
               break;
             case 'disconnected':
-              setState('disconnected');
-              clearInterval(pollInterval);
+              // Baileys normally emits restartRequired immediately after a successful
+              // QR scan. Keep polling while the replacement socket opens instead of
+              // showing a false failure at the exact moment pairing succeeds.
+              if (sawQr && postQrDisconnectCount < 10) {
+                postQrDisconnectCount++;
+                setState('connecting');
+              } else {
+                setState('disconnected');
+                clearInterval(pollInterval);
+              }
               break;
             case 'not_found':
               notFoundCount++;
