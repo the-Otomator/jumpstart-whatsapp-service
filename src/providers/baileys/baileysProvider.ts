@@ -458,6 +458,12 @@ export class BaileysProvider implements WhatsAppProvider {
         }
         if (mediaType) {
           payload.mediaType = mediaType
+          if (mediaType === 'audio') {
+            const seconds = msg.message?.audioMessage?.seconds
+            if (typeof seconds === 'number' && Number.isFinite(seconds)) {
+              payload.mediaDurationSeconds = Math.max(0, Math.round(seconds))
+            }
+          }
           // Download now — Baileys media URLs are not fetchable later (keys on message).
           // Failure must never block the webhook.
           try {
