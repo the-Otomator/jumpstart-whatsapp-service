@@ -1,6 +1,6 @@
 import { logger } from './logger'
 import { redactWebhookUrl } from './webhookUrl'
-import { persistWebhookHealth, type WebhookHealthResult } from './webhookHealth'
+import type { WebhookHealthResult } from './webhookHealth'
 
 export type WebhookDispatchCategory = Extract<
   WebhookHealthResult['category'],
@@ -27,14 +27,12 @@ interface WebhookFailure {
 interface WebhookDispatcherDependencies {
   fetchImpl?: typeof fetch
   sleep?: (delayMs: number) => Promise<void>
-  persistHealth?: typeof persistWebhookHealth
 }
 
 const MAX_RETRIES = 3
 const RETRY_DELAYS = [1000, 5000, 15000]
 const MAX_FAILURES_STORED = 100
 const failureLog: WebhookFailure[] = []
-const healthWriteChains = new Map<string, Promise<void>>()
 
 /** Legacy Baileys configs pointed at a non-existent EF; repoint to wa-webhook. */
 export function normalizeJumpstartInboundWebhookUrl(webhookUrl: string): string {
@@ -145,7 +143,6 @@ export async function postWebhook(
   const fetchImpl = dependencies.fetchImpl ?? fetch
   const sleep = dependencies.sleep
     ?? ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)))
-  const writeHealth = dependencies.persistHealth ?? persistWebhookHealth
   let lastResult: WebhookDispatchResult = {
     ok: false,
     category: 'unreachable',
@@ -156,7 +153,9 @@ export async function postWebhook(
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     lastResult = await attemptPost(url, payload, attempt + 1, fetchImpl)
     if (lastResult.ok) {
-      writeHealthWithoutBlocking(orgId, lastResult, writeHealth)
+      // Live inbound must not write wa_devices.webhook_audit_* — a 400 ingest
+      // rejection followed by a 200 (148 ms–minutes later) was flipping the
+      // audit columns on every cycle. Only webhookAudit.ts persists health.
       logger.debug({ orgId, event: payload.event }, 'Webhook delivered')
       return
     }
@@ -175,7 +174,6 @@ export async function postWebhook(
   failureLog.push(failure)
   if (failureLog.length > MAX_FAILURES_STORED) failureLog.shift()
 
-  writeHealthWithoutBlocking(orgId, lastResult, writeHealth)
   logger.error(
     {
       orgId,
@@ -185,28 +183,6 @@ export async function postWebhook(
     },
     'Webhook delivery failed after all retries'
   )
-}
-
-function writeHealthWithoutBlocking(
-  sessionKey: string,
-  result: WebhookDispatchResult,
-  writer: typeof persistWebhookHealth
-): void {
-  const previous = healthWriteChains.get(sessionKey) ?? Promise.resolve()
-  const next = previous
-    .catch(() => undefined)
-    .then(() => writer(sessionKey, result))
-  healthWriteChains.set(sessionKey, next)
-  void next
-    .catch((err) => {
-      logger.warn(
-        { sessionKey, err: err instanceof Error ? err.message : 'unknown_error' },
-        'Webhook health writer rejected'
-      )
-    })
-    .finally(() => {
-      if (healthWriteChains.get(sessionKey) === next) healthWriteChains.delete(sessionKey)
-    })
 }
 
 export function getWebhookFailures(orgId?: string): WebhookFailure[] {

@@ -33,6 +33,19 @@ function auditIntervalWithJitter(baseMs: number): number {
   return Math.max(1_000, Math.round(baseMs * factor))
 }
 
+/**
+ * Probe body for wa-webhook. `event: 'webhook.probe'` is required — without it
+ * the handler falls through to message parsing and returns 400 `missing message`.
+ * Do not add `message`/`from`: that would ingest a fake inbound row.
+ */
+export function buildWebhookProbePayload(sessionKey: string, probeId: string): {
+  event: 'webhook.probe'
+  orgId: string
+  probeId: string
+} {
+  return { event: 'webhook.probe', orgId: sessionKey, probeId }
+}
+
 function invalidConfig(
   category: 'invalid_config' | 'missing_meta',
   errorCode: string
@@ -79,7 +92,7 @@ export async function runWebhookAudit(
 
       const result = await probe(
         normalizeJumpstartInboundWebhookUrl(parsed.toString()),
-        { event: 'webhook.probe', orgId: sessionKey, probeId: createProbeId() },
+        buildWebhookProbePayload(sessionKey, createProbeId()),
         1
       )
       await persist(sessionKey, result)

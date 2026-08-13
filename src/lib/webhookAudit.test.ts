@@ -1,9 +1,15 @@
 import assert from 'assert'
-import { runWebhookAudit } from './webhookAudit'
+import { buildWebhookProbePayload, runWebhookAudit } from './webhookAudit'
 import type { SessionMeta } from './sessionStore'
 import type { WebhookHealthResult } from './webhookHealth'
 
 async function main(): Promise<void> {
+  assert.deepStrictEqual(buildWebhookProbePayload('session-key', 'probe-1'), {
+    event: 'webhook.probe',
+    orgId: 'session-key',
+    probeId: 'probe-1',
+  })
+
   const metas = new Map<string, SessionMeta | null>([
     ['missing-meta', null],
     ['invalid-url', baseMeta('invalid-url', 'not-a-url')],
