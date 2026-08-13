@@ -35,6 +35,7 @@ import { WA_SEND_TIMEOUT_MS, withTimeout } from '../../lib/withTimeout'
 import {
   type ExtendedMessageKey,
   resolveGroupInbound,
+  shouldPostInboundWebhook,
   jidLocalPart,
   pickPnDigits,
 } from '../../lib/groupInbound'
@@ -497,7 +498,11 @@ export class BaileysProvider implements WhatsAppProvider {
           'Incoming message',
         )
 
-        if (session.webhookUrl) await postWebhook(session.webhookUrl, payload)
+        if (session.webhookUrl && shouldPostInboundWebhook(isGroup, groupJid)) {
+          await postWebhook(session.webhookUrl, payload)
+        } else if (isGroup && !groupJid) {
+          log.debug({ key: msg.key }, 'skipping webhook for group inbound without groupId')
+        }
       }
     })
 

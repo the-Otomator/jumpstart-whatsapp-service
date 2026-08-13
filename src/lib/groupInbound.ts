@@ -37,6 +37,15 @@ export function resolveGroupInbound(key: ExtendedMessageKey): {
   return { isGroup, groupJid, ambiguous }
 }
 
+/**
+ * wa-webhook returns 400 `group message missing groupId` when isGroup is true
+ * without groupId. Do not POST that shape — it is the audit-column flap source
+ * when mixed with a later well-formed inbound.
+ */
+export function shouldPostInboundWebhook(isGroup: boolean, groupJid: string | null): boolean {
+  return !(isGroup && !groupJid)
+}
+
 export function jidToDigits(v?: string | null): string | null {
   if (!v) return null
   const bare = String(v).split('@')[0].split(':')[0].replace(/[^0-9]/g, '')

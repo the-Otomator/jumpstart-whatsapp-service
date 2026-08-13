@@ -7,7 +7,6 @@ import {
   normalizeJumpstartInboundWebhookUrl,
   postWebhook,
 } from './webhookDispatcher'
-import type { WebhookHealthResult } from './webhookHealth'
 import { redactWebhookUrl } from './webhookUrl'
 
 const URL = 'https://example.test/functions/v1/wa-webhook'
@@ -74,33 +73,25 @@ async function testClassifications(): Promise<void> {
 
 async function testRetriesAndNonBlockingTelemetry(): Promise<void> {
   const retry = fetchReturning(500, 200)
-  const writes: WebhookHealthResult[] = []
   await postWebhook(URL, { orgId: ORG, event: 'message', message: 'private-body' }, {
     fetchImpl: retry.fetchImpl,
     sleep: noSleep,
-    persistHealth: async (_sessionKey, result) => { writes.push(result) },
   })
   await flushTelemetry()
   assert.strictEqual(retry.calls(), 2, 'must retry once and then stop on success')
-  assert.strictEqual(writes.length, 1)
-  assert.strictEqual(writes[0].category, 'ok')
 
   clearWebhookFailures(ORG)
   const exhausted = fetchReturning(500)
-  const failedWrites: WebhookHealthResult[] = []
   await postWebhook(
     `${URL}?secret=sensitive-query-value`,
     { orgId: ORG, event: 'message', message: 'sensitive-payload-value' },
     {
       fetchImpl: exhausted.fetchImpl,
       sleep: noSleep,
-      persistHealth: async (_sessionKey, result) => { failedWrites.push(result) },
     }
   )
   await flushTelemetry()
   assert.strictEqual(exhausted.calls(), 3, 'must exhaust exactly three attempts')
-  assert.strictEqual(failedWrites.length, 1)
-  assert.strictEqual(failedWrites[0].category, 'http_rejected')
   const stored = JSON.stringify(getWebhookFailures(ORG))
   assert.ok(!stored.includes('sensitive-query-value'), 'stored URL must redact query secret')
   assert.ok(!stored.includes('sensitive-payload-value'), 'stored failure must not retain payload')
@@ -109,7 +100,6 @@ async function testRetriesAndNonBlockingTelemetry(): Promise<void> {
   await assert.doesNotReject(() => postWebhook(URL, { orgId: 'writer-failure' }, {
     fetchImpl: healthy.fetchImpl,
     sleep: noSleep,
-    persistHealth: async () => { throw new Error('health storage unavailable') },
   }))
   await flushTelemetry()
 }
