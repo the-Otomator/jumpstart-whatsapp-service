@@ -122,6 +122,21 @@ function testHeadersAndUrlSanitization(): void {
     assert.strictEqual(headers['x-wa-session-key'], ORG)
     assert.strictEqual(headers.Authorization, 'Bearer non-production-test-value')
 
+    // Two connected Baileys devices in one org must send *their own* session_key,
+    // not the bare organization UUID. Exact match on wa-webhook depends on this.
+    const org = 'c3aa7a0d-461a-4ed4-882a-58bd063b1e62'
+    const privateKey = `${org}__84920ad6`
+    const mainKey = `${org}-d1fde265`
+    const privateHeaders = buildWebhookHeaders(URL, { orgId: privateKey, event: 'message' })
+    const mainHeaders = buildWebhookHeaders(URL, { orgId: mainKey, event: 'message' })
+    const bareHeaders = buildWebhookHeaders(URL, { orgId: org, event: 'message' })
+    assert.strictEqual(privateHeaders['x-wa-session-key'], privateKey)
+    assert.strictEqual(mainHeaders['x-wa-session-key'], mainKey)
+    assert.strictEqual(bareHeaders['x-wa-session-key'], org)
+    assert.notStrictEqual(privateHeaders['x-wa-session-key'], mainHeaders['x-wa-session-key'])
+    assert.notStrictEqual(privateHeaders['x-wa-session-key'], org)
+    assert.notStrictEqual(mainHeaders['x-wa-session-key'], org)
+
     const withQuery = buildWebhookHeaders(`${URL}?secret=query-value`, { orgId: ORG })
     assert.ok(!withQuery.Authorization, 'query-secret URLs keep existing no-Bearer behavior')
 

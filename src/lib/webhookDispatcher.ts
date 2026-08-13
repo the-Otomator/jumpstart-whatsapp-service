@@ -51,15 +51,23 @@ function isJumpstartInboundWebhookPath(url: string): boolean {
   )
 }
 
-/** Preserve the existing delivery authentication contract. */
+/**
+ * Preserve the existing delivery authentication contract.
+ *
+ * `payload.orgId` is the VPS session identity — the same string CRM stores as
+ * `wa_devices.session_key` and passes to `POST /api/sessions/:orgId/start`.
+ * It is the organization UUID only for legacy single-device orgs. Multi-device
+ * orgs use `<org>__<device8>` or `<org>-<rand8>`. Never substitute the bare
+ * organization UUID here: `wa-webhook` exact-matches `session_key` first.
+ */
 export function buildWebhookHeaders(
   url: string,
   payload: Record<string, unknown>
 ): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const orgId = typeof payload.orgId === 'string' ? payload.orgId : undefined
-  if (orgId && url.includes('/functions/v1/wa-webhook')) {
-    headers['x-wa-session-key'] = orgId
+  const sessionKey = typeof payload.orgId === 'string' ? payload.orgId : undefined
+  if (sessionKey && url.includes('/functions/v1/wa-webhook')) {
+    headers['x-wa-session-key'] = sessionKey
   }
 
   if (isJumpstartInboundWebhookPath(url)) {
