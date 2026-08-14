@@ -23,6 +23,7 @@ import { listActiveSessions, restoreSessions } from './sessionManager'
 import { logger } from './lib/logger'
 import { requestIdMiddleware } from './middleware/requestId'
 import { setupGracefulShutdown } from './lib/shutdown'
+import { installCrashCapture } from './lib/crashCapture'
 import {
   startWaDeviceMonitor,
   stopWaDeviceMonitor,
@@ -36,6 +37,18 @@ import {
 import { startWebhookAudit, stopWebhookAudit } from './lib/webhookAudit'
 
 const execAsync = promisify(exec)
+
+// Installed first so a crash during startup is still attributable.
+installCrashCapture({
+  getContext: () => {
+    const sessions = listActiveSessions()
+    return {
+      sessions: sessions.length,
+      connected: sessions.filter((s) => s.status === 'connected').length,
+      sessionStates: sessions.map((s) => ({ orgId: s.orgId, status: s.status })),
+    }
+  },
+})
 
 // In-memory error log (last 100 errors, used by /health)
 interface ErrorEntry { time: number; msg: string }
