@@ -111,6 +111,11 @@ export interface GroupMetadataResponse {
   description: string | null
   participants: GroupMetadataParticipant[]
   owner: string | null
+  /** Raw Baileys policy flags. Consumers must map semantics from observed values. */
+  announce: boolean | null
+  restrict: boolean | null
+  memberAddMode: boolean | null
+  joinApprovalMode: boolean | null
 }
 
 export interface AdminedGroup {
