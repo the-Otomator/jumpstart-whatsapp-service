@@ -78,6 +78,7 @@ const PORT = process.env.PORT ?? 3001
 // Each regex is tested against the full Origin header value.
 const builtInPatterns: RegExp[] = [
   /^https:\/\/[a-z0-9-]+\.workmatch\.space$/,   // *.workmatch.space
+  /^https:\/\/[a-z0-9-]+\.nima-hr\.com$/,        // *.nima-hr.com (WorkMatch custom domains)
   /^https:\/\/[a-z0-9-]+\.otomator\.co\.il$/,    // *.otomator.co.il
   /^https?:\/\/localhost(:\d+)?$/,                // localhost (any port, http or https)
 ]
@@ -99,6 +100,7 @@ function isOriginAllowed(origin: string): boolean {
 const frameAncestors: string[] = [
   "'self'",
   '*.workmatch.space',
+  '*.nima-hr.com',
   '*.otomator.co.il',
   ...allowedOrigins,
 ]
@@ -117,6 +119,9 @@ if (allowedOrigins.length === 0) {
 // Security
 app.use(
   helmet({
+    // CSP frame-ancestors below is the authoritative allowlist. Helmet's
+    // legacy SAMEORIGIN header would otherwise block every allowed tenant.
+    xFrameOptions: false,
     // Default same-origin blocks cross-origin fetch of /status from Jumpstart even when CORS allows.
     crossOriginResourcePolicy: { policy: 'cross-origin' },
     contentSecurityPolicy: {
