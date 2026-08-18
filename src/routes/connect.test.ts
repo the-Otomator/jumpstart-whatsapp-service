@@ -21,6 +21,7 @@ async function main(): Promise<void> {
   const stopCalls: string[] = []
   const statuses = new Map<string, unknown>()
   const deviceWebhookUrls = new Map<string, string | null>()
+  const deviceWebhookSecrets = new Map<string, string | null>()
   let server: Server | undefined
 
   try {
@@ -35,6 +36,7 @@ async function main(): Promise<void> {
     ;(supabase as any).validateOrg = async (orgId: string) => ({
       valid: true,
       deviceWebhookUrl: deviceWebhookUrls.get(orgId) ?? null,
+      deviceWebhookSecret: deviceWebhookSecrets.get(orgId) ?? null,
     })
 
     const app = express()
@@ -81,6 +83,7 @@ async function main(): Promise<void> {
     assert.deepStrictEqual(startCalls[1], { orgId: orgWithMetaFallback, webhookUrl: metaWebhookUrl })
 
     const orgWithoutWebhook = 'org-without-webhook'
+    deviceWebhookSecrets.set(orgWithoutWebhook, 'orphaned-secret-value')
     const missingResponse = await fetch(`${baseUrl}/${orgWithoutWebhook}`)
     const missingBody = await missingResponse.text()
     assert.strictEqual(missingResponse.status, 503)

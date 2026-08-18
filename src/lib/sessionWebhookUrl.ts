@@ -1,11 +1,16 @@
-import { getDeviceWebhookUrl } from './supabase'
+import { lookupWhatsappDevice } from './supabase'
 import { loadSessionMeta } from './sessionStore'
 import { isValidWebhookUrl } from './webhookUrl'
+import {
+  clearSessionWebhookSecret,
+  setSessionWebhookSecret,
+} from './webhookDispatcher'
 
 export interface ResolveSessionWebhookOptions {
   /** Prefetched by validateOrg so the connect route does not query the device twice. */
   deviceWebhookUrl?: unknown
-  lookupDeviceWebhookUrl?: typeof getDeviceWebhookUrl
+  deviceWebhookSecret?: unknown
+  lookupDevice?: typeof lookupWhatsappDevice
   loadMeta?: typeof loadSessionMeta
 }
 
@@ -18,12 +23,19 @@ export async function resolveSessionWebhookUrl(
     options,
     'deviceWebhookUrl'
   )
-  const registryValue = hasPrefetchedDeviceValue
-    ? options.deviceWebhookUrl
-    : await (options.lookupDeviceWebhookUrl ?? getDeviceWebhookUrl)(sessionKey)
+  const device = hasPrefetchedDeviceValue
+    ? {
+        webhookUrl: options.deviceWebhookUrl,
+        webhookSecret: options.deviceWebhookSecret,
+      }
+    : await (options.lookupDevice ?? lookupWhatsappDevice)(sessionKey)
 
-  if (isValidWebhookUrl(registryValue)) return registryValue.trim()
+  if (isValidWebhookUrl(device.webhookUrl)) {
+    setSessionWebhookSecret(sessionKey, device.webhookSecret)
+    return device.webhookUrl.trim()
+  }
 
+  clearSessionWebhookSecret(sessionKey)
   const metaValue = (options.loadMeta ?? loadSessionMeta)(sessionKey)?.webhookUrl
   return isValidWebhookUrl(metaValue) ? metaValue.trim() : undefined
 }
