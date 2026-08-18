@@ -4,6 +4,7 @@ import { orgLogger } from '../lib/logger'
 import { validateOrg } from '../lib/supabase'
 
 const router = Router()
+const CONNECT_PAGE_MARKER = '<!-- connect-v3 -->'
 
 /**
  * GET /connect/:orgId/status (JSON)
@@ -80,6 +81,7 @@ function renderConnectPage(orgId: string, label: string): string {
     : 'אפשר לתת למכשיר שם במערכת: הגדרות ← WhatsApp ← מכשירים.'
 
   return `<!DOCTYPE html>
+${CONNECT_PAGE_MARKER}
 <html lang="he" dir="rtl">
 <head>
   <meta charset="UTF-8">
@@ -174,7 +176,6 @@ function renderConnectPage(orgId: string, label: string): string {
       <p style="color:#666;font-size:12px;margin-top:8px;" dir="ltr">Finishing WhatsApp connection…</p>
     </div>
 
-    <!-- connect-v3 -->
     <div id="state-connected" class="state">
       <div class="connected-icon">&#9989;</div>
       <h2 style="margin-bottom:8px;">החיבור הצליח!</h2>
@@ -279,6 +280,7 @@ function renderConnectPage(orgId: string, label: string): string {
 
 function renderErrorPage(orgId: string, message: string): string {
   return `<!DOCTYPE html>
+${CONNECT_PAGE_MARKER}
 <html lang="he" dir="rtl">
 <head>
   <meta charset="UTF-8">
