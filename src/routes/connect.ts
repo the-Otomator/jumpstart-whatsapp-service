@@ -32,6 +32,7 @@ router.get('/:orgId/status', (req: Request, res: Response) => {
  */
 router.get('/:orgId', async (req: Request, res: Response) => {
   const { orgId } = req.params
+  const label = normalizeLabel(req.query.label)
   const log = orgLogger(orgId)
 
   const orgCheck = await validateOrg(orgId)
@@ -56,10 +57,28 @@ router.get('/:orgId', async (req: Request, res: Response) => {
     }
   }
 
-  res.send(renderConnectPage(orgId))
+  res.send(renderConnectPage(orgId, label))
 })
 
-function renderConnectPage(orgId: string): string {
+function normalizeLabel(value: unknown): string {
+  return typeof value === 'string' ? value.trim().slice(0, 60) : ''
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character]!)
+}
+
+function renderConnectPage(orgId: string, label: string): string {
+  const deviceLine = label
+    ? `המכשיר &quot;${escapeHtml(label)}&quot; מחובר כעת ל־JumpStart.`
+    : 'אפשר לתת למכשיר שם במערכת: הגדרות ← WhatsApp ← מכשירים.'
+
   return `<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
@@ -93,10 +112,13 @@ function renderConnectPage(orgId: string): string {
     .qr-container img { width: 256px; height: 256px; display: block; }
     .connected-icon { font-size: 64px; margin: 16px 0; }
     .success-panel {
-      margin-top: 16px; padding: 16px; border: 1px solid #235c38;
-      border-radius: 12px; background: #102419; color: #bbf7d0;
-      font-size: 14px; line-height: 1.7;
+      margin-top: 16px; padding: 16px; border: 1px solid #d97706;
+      border-radius: 12px; background: #2b1d0b; color: #fde68a;
+      font-size: 14px; line-height: 1.7; text-align: right;
     }
+    .success-panel strong { color: #fef3c7; font-size: 15px; }
+    .device-line { margin-top: 10px; color: #d4d4d4; font-size: 14px; }
+    .closing-line { margin-top: 16px; color: #aaa; font-size: 14px; }
     .phone-number {
       font-size: 20px; font-weight: 600; color: #4ade80;
       font-family: monospace; direction: ltr;
@@ -152,14 +174,18 @@ function renderConnectPage(orgId: string): string {
       <p style="color:#666;font-size:12px;margin-top:8px;" dir="ltr">Finishing WhatsApp connection…</p>
     </div>
 
+    <!-- connect-v3 -->
     <div id="state-connected" class="state">
       <div class="connected-icon">&#9989;</div>
       <h2 style="margin-bottom:8px;">החיבור הצליח!</h2>
       <p class="phone-number" id="phone-display"></p>
+      <p class="device-line">${deviceLine}</p>
       <div class="success-panel">
-        המכשיר מחובר כעת ל־JumpStart וניתן להתחיל לעבוד.<br>
-        אפשר לסגור את החלון ולחזור למערכת.
+        <strong>⚠️ חשוב — סנכרון ראשוני</strong><br>
+        השאירו את WhatsApp פתוח בטלפון לפחות 10 דקות, כשהטלפון מחובר לחשמל ולאינטרנט.<br>
+        בזמן הזה נטענים אנשי הקשר וההודעות. סגירה מוקדמת של WhatsApp תגרום לסנכרון חלקי.
       </div>
+      <p class="closing-line">אפשר לסגור את החלון הזה — הסנכרון ממשיך ברקע.</p>
     </div>
 
     <div id="state-disconnected" class="state">
@@ -184,6 +210,9 @@ function renderConnectPage(orgId: string): string {
     var notFoundCount = 0;
     var sawQr = false;
     var postQrDisconnectCount = 0;
+    var pageLoadedAt = Date.now();
+    var postQrDisconnectLimit = 23;
+    var initialDisconnectGraceMs = 30000;
 
     function setState(state) {
       if (state === currentState) return;
@@ -221,7 +250,8 @@ function renderConnectPage(orgId: string): string {
               // Baileys normally emits restartRequired immediately after a successful
               // QR scan. Keep polling while the replacement socket opens instead of
               // showing a false failure at the exact moment pairing succeeds.
-              if (sawQr && postQrDisconnectCount < 10) {
+              if (Date.now() - pageLoadedAt < initialDisconnectGraceMs ||
+                  (sawQr && postQrDisconnectCount < postQrDisconnectLimit)) {
                 postQrDisconnectCount++;
                 setState('connecting');
               } else {
