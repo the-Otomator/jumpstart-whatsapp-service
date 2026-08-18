@@ -2,6 +2,8 @@
 import { getQR, getStatus, startSession, stopSession } from '../sessionManager'
 import { orgLogger } from '../lib/logger'
 import { validateOrg } from '../lib/supabase'
+import { loadSessionMeta } from '../lib/sessionStore'
+import { isValidWebhookUrl, WEBHOOK_URL_REQUIRED } from '../lib/webhookUrl'
 
 const router = Router()
 const CONNECT_PAGE_MARKER = '<!-- connect-v3 -->'
@@ -46,13 +48,27 @@ router.get('/:orgId', async (req: Request, res: Response) => {
   // For disconnected sessions: purge stale creds first so a fresh QR is always generated.
   const status = getStatus(orgId)
   if (!status || status.status === 'disconnected') {
-    log.info({ prevStatus: status?.status ?? 'none' }, 'Auto-starting session from connect page')
+    const prevStatus = status?.status ?? 'none'
+    const webhookUrl = resolveWebhookUrl(orgId)
+    if (!webhookUrl) {
+      log.error(
+        { code: WEBHOOK_URL_REQUIRED, prevStatus },
+        'Cannot auto-start session from connect page without a valid webhookUrl'
+      )
+      res.status(503).send(renderErrorPage(
+        orgId,
+        'לא ניתן להתחיל חיבור מכאן — יש להפעיל את המכשיר מתוך JumpStart (הגדרות ← WhatsApp ← מכשירים).'
+      ))
+      return
+    }
+
+    log.info({ prevStatus }, 'Auto-starting session from connect page')
     try {
       if (status?.status === 'disconnected') {
         stopSession(orgId, { purgeAuthDir: true })
         await new Promise((r) => setTimeout(r, 500))
       }
-      await startSession(orgId)
+      await startSession(orgId, webhookUrl)
     } catch (err) {
       log.error({ err }, 'Failed to auto-start session from connect page')
     }
@@ -60,6 +76,12 @@ router.get('/:orgId', async (req: Request, res: Response) => {
 
   res.send(renderConnectPage(orgId, label))
 })
+
+function resolveWebhookUrl(orgId: string): string | undefined {
+  const candidates = [loadSessionMeta(orgId)?.webhookUrl, process.env.DEFAULT_WEBHOOK_URL]
+  const resolved = candidates.find(isValidWebhookUrl)
+  return resolved?.trim()
+}
 
 function normalizeLabel(value: unknown): string {
   return typeof value === 'string' ? value.trim().slice(0, 60) : ''
