@@ -327,6 +327,10 @@ router.get(
         description: meta.desc ?? null,
         participants,
         owner: meta.owner ? jidToPhone(meta.owner) : null,
+        announce: meta.announce ?? null,
+        restrict: meta.restrict ?? null,
+        memberAddMode: meta.memberAddMode ?? null,
+        joinApprovalMode: meta.joinApprovalMode ?? null,
       })
     } catch (err) {
       log.error({ groupJid, err: (err as Error).message }, 'Failed to fetch group metadata')
