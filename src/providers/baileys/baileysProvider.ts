@@ -44,10 +44,10 @@ import {
   evaluateBackfill,
 } from '../../lib/backfillGuard'
 import {
-  isValidWebhookUrl,
   requireWebhookUrl,
   WEBHOOK_URL_REQUIRED,
 } from '../../lib/webhookUrl'
+import { resolveSessionWebhookUrl } from '../../lib/sessionWebhookUrl'
 import { useHardenedMultiFileAuthState } from '../../lib/hardenedMultiFileAuthState'
 import {
   acquireSessionLock,
@@ -673,20 +673,6 @@ export class BaileysProvider implements WhatsAppProvider {
     return Array.from(this.sessions.values())
   }
 
-  /** Log every stored session whose meta lacks a usable webhookUrl (startup fail-loud). */
-  logSessionsMissingWebhook(): void {
-    for (const orgId of listStoredSessions()) {
-      const meta = loadSessionMeta(orgId)
-      if (!meta || meta.provider === 'meta-cloud') continue
-      if (!isValidWebhookUrl(meta.webhookUrl)) {
-        logger.error(
-          { orgId },
-          'Stored session meta lacks usable webhookUrl — will not auto-restore'
-        )
-      }
-    }
-  }
-
   async restoreSessions(): Promise<void> {
     const orgIds = listStoredSessions()
     if (orgIds.length === 0) {
@@ -694,30 +680,29 @@ export class BaileysProvider implements WhatsAppProvider {
       return
     }
 
-    this.logSessionsMissingWebhook()
     logger.info({ count: orgIds.length }, 'Restoring sessions from disk')
 
     for (const orgId of orgIds) {
       const meta = loadSessionMeta(orgId)
-      if (meta && meta.autoRestore !== false) {
-        if (meta.provider === 'meta-cloud') continue
-        if (!isValidWebhookUrl(meta.webhookUrl)) {
-          const lastError = `${WEBHOOK_URL_REQUIRED}: persisted meta has no usable webhookUrl`
-          logger.error({ orgId }, 'Skipping restore: session meta has no usable webhookUrl')
-          this.sessions.set(orgId, {
-            orgId,
-            provider: 'baileys',
-            status: 'disconnected',
-            lastError,
-          })
-          continue
-        }
-        try {
-          await this.start(orgId, meta.webhookUrl)
-          logger.info({ orgId }, 'Session restored')
-        } catch (err) {
-          logger.error({ orgId, err }, 'Failed to restore session')
-        }
+      if (meta?.provider === 'meta-cloud' || meta?.autoRestore === false) continue
+
+      const webhookUrl = await resolveSessionWebhookUrl(orgId)
+      if (!webhookUrl) {
+        const lastError = `${WEBHOOK_URL_REQUIRED}: registry and persisted meta have no usable webhookUrl`
+        logger.error({ orgId }, 'Skipping restore: no usable webhookUrl')
+        this.sessions.set(orgId, {
+          orgId,
+          provider: 'baileys',
+          status: 'disconnected',
+          lastError,
+        })
+        continue
+      }
+      try {
+        await this.start(orgId, webhookUrl)
+        logger.info({ orgId }, 'Session restored')
+      } catch (err) {
+        logger.error({ orgId, err }, 'Failed to restore session')
       }
     }
   }

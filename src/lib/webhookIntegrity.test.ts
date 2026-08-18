@@ -17,6 +17,7 @@ import {
   WEBHOOK_URL_REQUIRED,
 } from './webhookUrl'
 import type { Session } from '../types'
+import * as sessionWebhookUrl from './sessionWebhookUrl'
 
 function getBaileys(): BaileysProvider {
   return getProvider('baileys') as BaileysProvider
@@ -128,10 +129,43 @@ async function testPatchWebhookKeepsSocket(): Promise<void> {
   assert.ok(result.next.includes('newsecret'))
 }
 
+async function testRestoreUsesRegistryWithoutMeta(): Promise<void> {
+  const prevCwd = process.cwd()
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-webhook-registry-restore-'))
+  const provider = getBaileys()
+  const originalStart = provider.start
+  const originalResolver = sessionWebhookUrl.resolveSessionWebhookUrl
+  const calls: Array<{ orgId: string; webhookUrl?: string }> = []
+
+  process.chdir(tmp)
+  try {
+    const orgId = 'org-restore-registry-only'
+    const webhookUrl = 'https://registry.example.test/functions/v1/wa-incoming'
+    const dir = path.join(tmp, 'sessions', orgId)
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'creds.json'), '{}', 'utf8')
+
+    ;(sessionWebhookUrl as any).resolveSessionWebhookUrl = async (sessionKey: string) =>
+      sessionKey === orgId ? webhookUrl : undefined
+    ;(provider as any).start = async (sessionKey: string, resolved?: string) => {
+      calls.push({ orgId: sessionKey, webhookUrl: resolved })
+    }
+
+    await provider.restoreSessions()
+    assert.deepStrictEqual(calls, [{ orgId, webhookUrl }])
+  } finally {
+    ;(provider as any).start = originalStart
+    ;(sessionWebhookUrl as any).resolveSessionWebhookUrl = originalResolver
+    process.chdir(prevCwd)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+}
+
 async function main(): Promise<void> {
   testValidator()
   await testStartRejectsMissingWebhook()
   await testRestoreSkipsMissingWebhook()
+  await testRestoreUsesRegistryWithoutMeta()
   await testPatchWebhookKeepsSocket()
   console.log('webhookIntegrity.test.ts: all checks passed')
 }
