@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-BRANCH="${DEPLOY_BRANCH:-main}"
+BRANCH="${DEPLOY_BRANCH:-master}"
 git fetch origin "$BRANCH"
 git checkout "$BRANCH"
 git pull --ff-only origin "$BRANCH"
@@ -14,7 +14,7 @@ if [ "$LOCAL" != "$REMOTE" ]; then
   exit 1
 fi
 
-export GIT_SHA="$(git rev-parse --short HEAD)"
+export GIT_SHA="$(git rev-parse HEAD)"
 export GIT_BRANCH="$BRANCH"
 echo "Deploying $GIT_BRANCH @ $GIT_SHA"
 

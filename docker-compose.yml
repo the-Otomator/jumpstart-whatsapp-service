@@ -3,8 +3,8 @@ services:
     build:
       context: .
       args:
-        GIT_SHA: ${GIT_SHA:-unknown}
-        GIT_BRANCH: ${GIT_BRANCH:-unknown}
+        GIT_SHA: ${GIT_SHA:?GIT_SHA must be exported before building}
+        GIT_BRANCH: ${GIT_BRANCH:?GIT_BRANCH must be exported before building}
     restart: unless-stopped
     logging:
       driver: json-file
@@ -15,10 +15,6 @@ services:
       - "127.0.0.1:${PORT:-3001}:3001"
     env_file:
       - .env
-    environment:
-      # Runtime fallback so /health reports SHA even if image was built without args
-      GIT_SHA: ${GIT_SHA:-unknown}
-      GIT_BRANCH: ${GIT_BRANCH:-unknown}
     volumes:
       - sessions-data:/app/sessions
     healthcheck:

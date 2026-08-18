@@ -34,8 +34,22 @@ import {
   stopMediaPruneScheduler,
 } from './lib/mediaCache'
 import { startWebhookAudit, stopWebhookAudit } from './lib/webhookAudit'
+import { installCrashCapture } from './lib/crashCapture'
+import { IMAGE_GIT_BRANCH, IMAGE_GIT_SHA } from './buildInfo'
 
 const execAsync = promisify(exec)
+
+// Installed first so a crash during startup is still attributable.
+installCrashCapture({
+  getContext: () => {
+    const sessions = listActiveSessions()
+    return {
+      sessions: sessions.length,
+      connected: sessions.filter((s) => s.status === 'connected').length,
+      sessionStates: sessions.map((s) => ({ orgId: s.orgId, status: s.status })),
+    }
+  },
+})
 
 // In-memory error log (last 100 errors, used by /health)
 interface ErrorEntry { time: number; msg: string }
@@ -72,12 +86,18 @@ if (!process.env.API_SECRET) {
 const app = express()
 const PORT = process.env.PORT ?? 3001
 
+// The only direct production hop is the local Traefik reverse proxy. Trusting
+// exactly one hop exposes the real client IP without accepting an arbitrary
+// caller-supplied X-Forwarded-For chain.
+app.set('trust proxy', 1)
+
 // CORS + iframe embed (same list: fetch /status + <iframe src=/connect/...>)
 //
 // Wildcard subdomain patterns - these always apply regardless of ALLOWED_ORIGINS.
 // Each regex is tested against the full Origin header value.
 const builtInPatterns: RegExp[] = [
   /^https:\/\/[a-z0-9-]+\.workmatch\.space$/,   // *.workmatch.space
+  /^https:\/\/[a-z0-9-]+\.nima-hr\.com$/,        // *.nima-hr.com (WorkMatch custom domains)
   /^https:\/\/[a-z0-9-]+\.otomator\.co\.il$/,    // *.otomator.co.il
   /^https?:\/\/localhost(:\d+)?$/,                // localhost (any port, http or https)
 ]
@@ -99,13 +119,14 @@ function isOriginAllowed(origin: string): boolean {
 const frameAncestors: string[] = [
   "'self'",
   '*.workmatch.space',
+  '*.nima-hr.com',
   '*.otomator.co.il',
   ...allowedOrigins,
 ]
 
 if (allowedOrigins.length === 0) {
   logger.info(
-    'ALLOWED_ORIGINS is empty - using built-in wildcard patterns only (*.workmatch.space, *.otomator.co.il, localhost).'
+    'ALLOWED_ORIGINS is empty - using built-in wildcard patterns only (*.workmatch.space, *.nima-hr.com, *.otomator.co.il, localhost).'
   )
 } else {
   logger.info(
@@ -117,6 +138,9 @@ if (allowedOrigins.length === 0) {
 // Security
 app.use(
   helmet({
+    // CSP frame-ancestors below is the authoritative allowlist. Helmet's
+    // legacy SAMEORIGIN header would otherwise block every allowed tenant.
+    xFrameOptions: false,
     // Default same-origin blocks cross-origin fetch of /status from Jumpstart even when CORS allows.
     crossOriginResourcePolicy: { policy: 'cross-origin' },
     contentSecurityPolicy: {
@@ -160,10 +184,11 @@ app.use(
   })
 )
 
-// Rate limiting (per IP, 100 requests/minute)
+// Rate limiting (per trusted client IP, 100 requests/minute). WorkMatch's
+// manage-whatsapp-session cache is deliberately sized around this ceiling.
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: 1000,
+  limit: 100,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many requests', code: 'RATE_LIMITED' },
@@ -182,8 +207,8 @@ app.get('/health', async (_req, res) => {
   res.json({
     status: 'ok',
     version: process.env.npm_package_version ?? '1.0.0',
-    gitSha: process.env.GIT_SHA ?? 'unknown',
-    gitBranch: process.env.GIT_BRANCH ?? 'unknown',
+    gitSha: validRuntimeBuildValue(process.env.GIT_SHA) ?? IMAGE_GIT_SHA,
+    gitBranch: validRuntimeBuildValue(process.env.GIT_BRANCH) ?? IMAGE_GIT_BRANCH,
     hostname: os.hostname(),
     sessions: sessionList.length,
     connected: sessionList.filter((s) => s.status === 'connected').length,
@@ -205,6 +230,11 @@ app.get('/health', async (_req, res) => {
     },
   })
 })
+
+function validRuntimeBuildValue(value: string | undefined): string | undefined {
+  const normalized = value?.trim()
+  return normalized && normalized !== 'unknown' ? normalized : undefined
+}
 
 // Connect page (no auth - onboarding flow)
 app.use('/connect', connectRoutes)
