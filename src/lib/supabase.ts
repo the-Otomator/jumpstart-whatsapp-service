@@ -14,6 +14,36 @@ export const supabase = (SUPABASE_URL && SUPABASE_SERVICE_KEY)
     })
   : null
 
+export interface WhatsappDeviceLookup {
+  orgId: string | null
+  webhookUrl: string | null
+}
+
+/** One registry read shared by entitlement validation and webhook resolution. */
+export async function lookupWhatsappDevice(sessionKey: string): Promise<WhatsappDeviceLookup> {
+  if (!supabase) return { orgId: null, webhookUrl: null }
+
+  const { data, error } = await supabase
+    .from('whatsapp_devices')
+    .select('org_id, webhook_url')
+    .eq('session_key', sessionKey)
+    .maybeSingle()
+
+  if (error) {
+    logger.warn({ sessionKey, err: error.message }, 'Failed to read WhatsApp device registry')
+    return { orgId: null, webhookUrl: null }
+  }
+
+  return {
+    orgId: typeof data?.org_id === 'string' ? data.org_id : null,
+    webhookUrl: typeof data?.webhook_url === 'string' ? data.webhook_url : null,
+  }
+}
+
+export async function getDeviceWebhookUrl(sessionKey: string): Promise<string | null> {
+  return (await lookupWhatsappDevice(sessionKey)).webhookUrl
+}
+
 /**
  * Check if an orgId has an active subscription for the whatsapp-service product.
  * Returns the subscription if valid, null if not found or inactive.
@@ -24,23 +54,20 @@ export async function validateOrg(orgId: string): Promise<{
   plan?: string
   userEmail?: string
   organizationName?: string
+  deviceWebhookUrl: string | null
 }> {
   // Dev mode — if no Supabase configured, allow all
   if (!supabase) {
     logger.debug({ orgId }, 'Supabase not configured — skipping org validation')
-    return { valid: true }
+    return { valid: true, deviceWebhookUrl: null }
   }
 
   try {
     // Resolve session_key -> org_id for multi-device sessions (e.g. "uuid-8char" suffix)
-    const { data: deviceRow } = await supabase
-      .from('whatsapp_devices')
-      .select('org_id')
-      .eq('session_key', orgId)
-      .maybeSingle()
-    if (deviceRow?.org_id) {
-      logger.debug({ sessionKey: orgId, orgId: deviceRow.org_id }, 'Resolved session_key to org_id')
-      orgId = deviceRow.org_id
+    const device = await lookupWhatsappDevice(orgId)
+    if (device.orgId) {
+      logger.debug({ sessionKey: orgId, orgId: device.orgId }, 'Resolved session_key to org_id')
+      orgId = device.orgId
     }
 
     const { data: central, error: centralErr } = await supabase
@@ -63,6 +90,7 @@ export async function validateOrg(orgId: string): Promise<{
           plan: central.plan,
           userEmail: central.user_email,
           organizationName: central.organization_name,
+          deviceWebhookUrl: device.webhookUrl,
         }
       }
     }
@@ -95,6 +123,7 @@ export async function validateOrg(orgId: string): Promise<{
         return {
           valid: true,
           plan: `jumpstart/${String(oss.plan_code)}`,
+          deviceWebhookUrl: device.webhookUrl,
         }
       }
 
@@ -111,15 +140,19 @@ export async function validateOrg(orgId: string): Promise<{
 
     if (slot) {
       logger.info({ orgId, partner: slot.partner_name }, 'WhatsApp allowed via partner license')
-      return { valid: true, plan: `partner/${slot.partner_name}` }
+      return {
+        valid: true,
+        plan: `partner/${slot.partner_name}`,
+        deviceWebhookUrl: device.webhookUrl,
+      }
     }
 
     logger.info({ orgId }, 'No WhatsApp entitlement found for org')
-    return { valid: false }
+    return { valid: false, deviceWebhookUrl: device.webhookUrl }
   } catch (err) {
     logger.error({ orgId, err }, 'Error validating org against Supabase')
     // Fail open in case of DB error — don't block the service
-    return { valid: true }
+    return { valid: true, deviceWebhookUrl: null }
   }
 }
 
