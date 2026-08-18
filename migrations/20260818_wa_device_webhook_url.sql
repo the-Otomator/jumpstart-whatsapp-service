@@ -58,34 +58,69 @@ create policy whatsapp_devices_update_webhook_admin
 revoke update on public.whatsapp_devices from anon, authenticated;
 grant update (webhook_url) on public.whatsapp_devices to authenticated;
 
--- The WA service uses service_role to read the registry and to write operational
--- status fields. Replace its table-wide writes with column grants that exclude
--- webhook_url, so the service key cannot alter routing while status writes continue.
-grant select on public.whatsapp_devices to service_role;
-revoke insert, update on public.whatsapp_devices from service_role;
+-- Keep service_role writes durable as the table gains columns. A trigger guards the
+-- sensitive routing target without turning the current column list into a grant snapshot.
+grant select, insert, update on public.whatsapp_devices to service_role;
 
-do $$
+create or replace function public.whatsapp_devices_guard_webhook_url()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog, pg_temp
+as $$
 declare
-  writable_columns text;
+  table_owner name;
+  caller_is_admin boolean;
 begin
-  select string_agg(quote_ident(column_name), ', ' order by ordinal_position)
-  into writable_columns
-  from information_schema.columns
-  where table_schema = 'public'
-    and table_name = 'whatsapp_devices'
-    and column_name <> 'webhook_url';
-
-  if writable_columns is null then
-    raise exception 'whatsapp_devices writable columns not found';
+  if tg_op = 'INSERT' then
+    if new.webhook_url is null then
+      return new;
+    end if;
+  elsif new.webhook_url is not distinct from old.webhook_url then
+    return new;
   end if;
 
-  execute format(
-    'grant insert (%s) on public.whatsapp_devices to service_role',
-    writable_columns
-  );
-  execute format(
-    'grant update (%s) on public.whatsapp_devices to service_role',
-    writable_columns
-  );
-end
+  select pg_catalog.pg_get_userbyid(c.relowner)
+  into table_owner
+  from pg_catalog.pg_class c
+  where c.oid = 'public.whatsapp_devices'::regclass;
+
+  -- SECURITY DEFINER makes current_user the function owner, so session_user is
+  -- required here to identify a direct postgres/table-owner maintenance session.
+  if session_user = 'postgres' or session_user = table_owner then
+    return new;
+  end if;
+
+  select exists (
+    select 1
+    from public.admin_users
+    where pg_catalog.lower(email) = pg_catalog.lower(auth.email())
+  )
+  into caller_is_admin;
+
+  if not caller_is_admin then
+    raise exception using
+      errcode = '42501',
+      message = case
+        when tg_op = 'INSERT' then
+          'whatsapp_devices.webhook_url may only be set by an authenticated admin or database owner'
+        else
+          'whatsapp_devices.webhook_url may only be changed by an authenticated admin or database owner'
+      end;
+  end if;
+
+  return new;
+end;
 $$;
+
+revoke all on function public.whatsapp_devices_guard_webhook_url() from public;
+revoke execute on function public.whatsapp_devices_guard_webhook_url() from anon;
+revoke execute on function public.whatsapp_devices_guard_webhook_url() from authenticated;
+revoke execute on function public.whatsapp_devices_guard_webhook_url() from service_role;
+
+drop trigger if exists whatsapp_devices_guard_webhook_url
+  on public.whatsapp_devices;
+create trigger whatsapp_devices_guard_webhook_url
+  before insert or update on public.whatsapp_devices
+  for each row
+  execute function public.whatsapp_devices_guard_webhook_url();
