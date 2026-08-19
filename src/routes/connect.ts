@@ -51,6 +51,7 @@ router.get('/:orgId', async (req: Request, res: Response) => {
     const prevStatus = status?.status ?? 'none'
     const webhookUrl = await resolveSessionWebhookUrl(orgId, {
       deviceWebhookUrl: orgCheck.deviceWebhookUrl,
+      deviceWebhookSecret: orgCheck.deviceWebhookSecret,
     })
     if (!webhookUrl) {
       log.error(

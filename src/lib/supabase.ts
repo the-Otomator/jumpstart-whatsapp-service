@@ -17,26 +17,28 @@ export const supabase = (SUPABASE_URL && SUPABASE_SERVICE_KEY)
 export interface WhatsappDeviceLookup {
   orgId: string | null
   webhookUrl: string | null
+  webhookSecret: string | null
 }
 
 /** One registry read shared by entitlement validation and webhook resolution. */
 export async function lookupWhatsappDevice(sessionKey: string): Promise<WhatsappDeviceLookup> {
-  if (!supabase) return { orgId: null, webhookUrl: null }
+  if (!supabase) return { orgId: null, webhookUrl: null, webhookSecret: null }
 
   const { data, error } = await supabase
     .from('whatsapp_devices')
-    .select('org_id, webhook_url')
+    .select('org_id, webhook_url, webhook_secret')
     .eq('session_key', sessionKey)
     .maybeSingle()
 
   if (error) {
     logger.warn({ sessionKey, err: error.message }, 'Failed to read WhatsApp device registry')
-    return { orgId: null, webhookUrl: null }
+    return { orgId: null, webhookUrl: null, webhookSecret: null }
   }
 
   return {
     orgId: typeof data?.org_id === 'string' ? data.org_id : null,
     webhookUrl: typeof data?.webhook_url === 'string' ? data.webhook_url : null,
+    webhookSecret: typeof data?.webhook_secret === 'string' ? data.webhook_secret : null,
   }
 }
 
@@ -55,11 +57,12 @@ export async function validateOrg(orgId: string): Promise<{
   userEmail?: string
   organizationName?: string
   deviceWebhookUrl: string | null
+  deviceWebhookSecret: string | null
 }> {
   // Dev mode — if no Supabase configured, allow all
   if (!supabase) {
     logger.debug({ orgId }, 'Supabase not configured — skipping org validation')
-    return { valid: true, deviceWebhookUrl: null }
+    return { valid: true, deviceWebhookUrl: null, deviceWebhookSecret: null }
   }
 
   try {
@@ -91,6 +94,7 @@ export async function validateOrg(orgId: string): Promise<{
           userEmail: central.user_email,
           organizationName: central.organization_name,
           deviceWebhookUrl: device.webhookUrl,
+          deviceWebhookSecret: device.webhookSecret,
         }
       }
     }
@@ -124,6 +128,7 @@ export async function validateOrg(orgId: string): Promise<{
           valid: true,
           plan: `jumpstart/${String(oss.plan_code)}`,
           deviceWebhookUrl: device.webhookUrl,
+          deviceWebhookSecret: device.webhookSecret,
         }
       }
 
@@ -144,15 +149,20 @@ export async function validateOrg(orgId: string): Promise<{
         valid: true,
         plan: `partner/${slot.partner_name}`,
         deviceWebhookUrl: device.webhookUrl,
+        deviceWebhookSecret: device.webhookSecret,
       }
     }
 
     logger.info({ orgId }, 'No WhatsApp entitlement found for org')
-    return { valid: false, deviceWebhookUrl: device.webhookUrl }
+    return {
+      valid: false,
+      deviceWebhookUrl: device.webhookUrl,
+      deviceWebhookSecret: device.webhookSecret,
+    }
   } catch (err) {
     logger.error({ orgId, err }, 'Error validating org against Supabase')
     // Fail open in case of DB error — don't block the service
-    return { valid: true, deviceWebhookUrl: null }
+    return { valid: true, deviceWebhookUrl: null, deviceWebhookSecret: null }
   }
 }
 
