@@ -2,8 +2,8 @@
 import { getQR, getStatus, startSession, stopSession } from '../sessionManager'
 import { orgLogger } from '../lib/logger'
 import { validateOrg } from '../lib/supabase'
-import { loadSessionMeta } from '../lib/sessionStore'
-import { isValidWebhookUrl, WEBHOOK_URL_REQUIRED } from '../lib/webhookUrl'
+import { resolveSessionWebhookUrl } from '../lib/sessionWebhookUrl'
+import { WEBHOOK_URL_REQUIRED } from '../lib/webhookUrl'
 
 const router = Router()
 const CONNECT_PAGE_MARKER = '<!-- connect-v3 -->'
@@ -49,7 +49,10 @@ router.get('/:orgId', async (req: Request, res: Response) => {
   const status = getStatus(orgId)
   if (!status || status.status === 'disconnected') {
     const prevStatus = status?.status ?? 'none'
-    const webhookUrl = resolveWebhookUrl(orgId)
+    const webhookUrl = await resolveSessionWebhookUrl(orgId, {
+      deviceWebhookUrl: orgCheck.deviceWebhookUrl,
+      deviceWebhookSecret: orgCheck.deviceWebhookSecret,
+    })
     if (!webhookUrl) {
       log.error(
         { code: WEBHOOK_URL_REQUIRED, prevStatus },
@@ -76,12 +79,6 @@ router.get('/:orgId', async (req: Request, res: Response) => {
 
   res.send(renderConnectPage(orgId, label))
 })
-
-function resolveWebhookUrl(orgId: string): string | undefined {
-  const candidates = [loadSessionMeta(orgId)?.webhookUrl, process.env.DEFAULT_WEBHOOK_URL]
-  const resolved = candidates.find(isValidWebhookUrl)
-  return resolved?.trim()
-}
 
 function normalizeLabel(value: unknown): string {
   return typeof value === 'string' ? value.trim().slice(0, 60) : ''

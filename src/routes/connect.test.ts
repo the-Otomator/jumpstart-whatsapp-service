@@ -12,7 +12,6 @@ type StartCall = { orgId: string; webhookUrl?: string }
 
 async function main(): Promise<void> {
   const originalCwd = process.cwd()
-  const originalDefaultWebhookUrl = process.env.DEFAULT_WEBHOOK_URL
   const originalGetStatus = sessionManager.getStatus
   const originalStartSession = sessionManager.startSession
   const originalStopSession = sessionManager.stopSession
@@ -21,11 +20,12 @@ async function main(): Promise<void> {
   const startCalls: StartCall[] = []
   const stopCalls: string[] = []
   const statuses = new Map<string, unknown>()
+  const deviceWebhookUrls = new Map<string, string | null>()
+  const deviceWebhookSecrets = new Map<string, string | null>()
   let server: Server | undefined
 
   try {
     process.chdir(tmp)
-    delete process.env.DEFAULT_WEBHOOK_URL
     ;(sessionManager as any).getStatus = (orgId: string) => statuses.get(orgId)
     ;(sessionManager as any).startSession = async (orgId: string, webhookUrl?: string) => {
       startCalls.push({ orgId, webhookUrl })
@@ -33,7 +33,11 @@ async function main(): Promise<void> {
     ;(sessionManager as any).stopSession = (orgId: string) => {
       stopCalls.push(orgId)
     }
-    ;(supabase as any).validateOrg = async () => ({ valid: true })
+    ;(supabase as any).validateOrg = async (orgId: string) => ({
+      valid: true,
+      deviceWebhookUrl: deviceWebhookUrls.get(orgId) ?? null,
+      deviceWebhookSecret: deviceWebhookSecrets.get(orgId) ?? null,
+    })
 
     const app = express()
     app.use('/connect', connectRouter)
@@ -44,32 +48,42 @@ async function main(): Promise<void> {
     assert(address && typeof address !== 'string', 'test server did not expose a TCP port')
     const baseUrl = `http://127.0.0.1:${address.port}/connect`
 
-    const orgWithMeta = 'org-with-meta-webhook'
-    const webhookUrl = 'https://example.test/functions/v1/wa-incoming?secret=test'
-    const sessionDir = path.join(tmp, 'sessions', orgWithMeta)
+    const orgWithDbAndMeta = 'org-with-db-and-meta-webhook'
+    const dbWebhookUrl = 'https://registry.example.test/functions/v1/wa-incoming'
+    const staleMetaWebhookUrl = 'https://legacy.example.test/old-hook'
+    deviceWebhookUrls.set(orgWithDbAndMeta, dbWebhookUrl)
+    const sessionDir = path.join(tmp, 'sessions', orgWithDbAndMeta)
     fs.mkdirSync(sessionDir, { recursive: true })
     fs.writeFileSync(path.join(sessionDir, 'meta.json'), JSON.stringify({
-      orgId: orgWithMeta,
-      webhookUrl,
+      orgId: orgWithDbAndMeta,
+      webhookUrl: staleMetaWebhookUrl,
       createdAt: new Date().toISOString(),
       autoRestore: true,
     }))
 
-    const startedResponse = await fetch(`${baseUrl}/${orgWithMeta}`)
+    const startedResponse = await fetch(`${baseUrl}/${orgWithDbAndMeta}`)
     const startedBody = await startedResponse.text()
     assert.strictEqual(startedResponse.status, 200)
     assert.ok(startedBody.includes('<!-- connect-v3 -->'), 'connect marker must remain present')
-    assert.deepStrictEqual(startCalls, [{ orgId: orgWithMeta, webhookUrl }])
+    assert.deepStrictEqual(startCalls, [{ orgId: orgWithDbAndMeta, webhookUrl: dbWebhookUrl }])
 
-    const orgWithDefault = 'org-with-default-webhook'
-    const defaultWebhookUrl = 'https://default.example.test/wa-incoming'
-    process.env.DEFAULT_WEBHOOK_URL = defaultWebhookUrl
-    const defaultResponse = await fetch(`${baseUrl}/${orgWithDefault}`)
-    assert.strictEqual(defaultResponse.status, 200)
-    assert.deepStrictEqual(startCalls[1], { orgId: orgWithDefault, webhookUrl: defaultWebhookUrl })
+    const orgWithMetaFallback = 'org-with-meta-fallback'
+    const metaWebhookUrl = 'https://legacy.example.test/functions/v1/wa-incoming'
+    const fallbackSessionDir = path.join(tmp, 'sessions', orgWithMetaFallback)
+    fs.mkdirSync(fallbackSessionDir, { recursive: true })
+    fs.writeFileSync(path.join(fallbackSessionDir, 'meta.json'), JSON.stringify({
+      orgId: orgWithMetaFallback,
+      webhookUrl: metaWebhookUrl,
+      createdAt: new Date().toISOString(),
+      autoRestore: true,
+    }))
+    deviceWebhookUrls.set(orgWithMetaFallback, null)
+    const fallbackResponse = await fetch(`${baseUrl}/${orgWithMetaFallback}`)
+    assert.strictEqual(fallbackResponse.status, 200)
+    assert.deepStrictEqual(startCalls[1], { orgId: orgWithMetaFallback, webhookUrl: metaWebhookUrl })
 
     const orgWithoutWebhook = 'org-without-webhook'
-    process.env.DEFAULT_WEBHOOK_URL = 'not-a-valid-url'
+    deviceWebhookSecrets.set(orgWithoutWebhook, 'orphaned-secret-value')
     const missingResponse = await fetch(`${baseUrl}/${orgWithoutWebhook}`)
     const missingBody = await missingResponse.text()
     assert.strictEqual(missingResponse.status, 503)
@@ -79,18 +93,15 @@ async function main(): Promise<void> {
 
     const disconnectedOrg = 'org-disconnected-without-webhook'
     statuses.set(disconnectedOrg, { orgId: disconnectedOrg, status: 'disconnected' })
-    delete process.env.DEFAULT_WEBHOOK_URL
     const disconnectedResponse = await fetch(`${baseUrl}/${disconnectedOrg}`)
     assert.strictEqual(disconnectedResponse.status, 503)
     assert.strictEqual(startCalls.length, 2, 'disconnected session without webhookUrl must not restart')
     assert.deepStrictEqual(stopCalls, [], 'disconnected session must not be purged before webhook resolution')
 
-    console.log('connect.test.ts: auto-start and missing-webhook checks passed')
+    console.log('connect.test.ts: registry priority, disk fallback, and fail-closed checks passed')
   } finally {
     if (server) await new Promise<void>((resolve) => server!.close(() => resolve()))
     process.chdir(originalCwd)
-    if (originalDefaultWebhookUrl === undefined) delete process.env.DEFAULT_WEBHOOK_URL
-    else process.env.DEFAULT_WEBHOOK_URL = originalDefaultWebhookUrl
     ;(sessionManager as any).getStatus = originalGetStatus
     ;(sessionManager as any).startSession = originalStartSession
     ;(sessionManager as any).stopSession = originalStopSession

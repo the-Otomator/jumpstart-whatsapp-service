@@ -35,6 +35,29 @@ const RETRY_DELAYS = [1000, 5000, 15000]
 const MAX_FAILURES_STORED = 100
 const failureLog: WebhookFailure[] = []
 const healthWriteChains = new Map<string, Promise<void>>()
+const sessionWebhookSecrets = new Map<string, string>()
+const legacySecretWarnings = new Set<string>()
+
+/** Keep the registry-only credential in memory; never persist it in session meta. */
+export function setSessionWebhookSecret(sessionKey: string, secret: unknown): void {
+  if (typeof secret === 'string' && secret.length > 0) {
+    sessionWebhookSecrets.set(sessionKey, secret)
+    return
+  }
+  clearSessionWebhookSecret(sessionKey)
+}
+
+export function clearSessionWebhookSecret(sessionKey: string): void {
+  sessionWebhookSecrets.delete(sessionKey)
+  legacySecretWarnings.delete(sessionKey)
+}
+
+/** Assemble the dispatch-only URL. The stored column always replaces a legacy query value. */
+export function appendWebhookSecret(webhookUrl: string, webhookSecret: string): string {
+  const assembled = new URL(webhookUrl)
+  assembled.searchParams.set('secret', webhookSecret)
+  return assembled.toString()
+}
 
 /** Legacy Baileys configs pointed at a non-existent EF; repoint to wa-webhook. */
 export function normalizeJumpstartInboundWebhookUrl(webhookUrl: string): string {
@@ -141,7 +164,20 @@ export async function postWebhook(
   dependencies: WebhookDispatcherDependencies = {}
 ): Promise<void> {
   const orgId = payload.orgId as string
-  const url = normalizeJumpstartInboundWebhookUrl(webhookUrl)
+  const normalizedUrl = normalizeJumpstartInboundWebhookUrl(webhookUrl)
+  const webhookSecret = sessionWebhookSecrets.get(orgId)
+  let url = normalizedUrl
+  if (webhookSecret) {
+    const alreadyHasSecret = new URL(normalizedUrl).searchParams.has('secret')
+    url = appendWebhookSecret(normalizedUrl, webhookSecret)
+    if (alreadyHasSecret && !legacySecretWarnings.has(orgId)) {
+      legacySecretWarnings.add(orgId)
+      logger.warn(
+        { orgId, url: redactWebhookUrl(url) },
+        'Registry webhook_secret overrides legacy secret query parameter'
+      )
+    }
+  }
   const fetchImpl = dependencies.fetchImpl ?? fetch
   const sleep = dependencies.sleep
     ?? ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)))

@@ -4,10 +4,10 @@ import { postWebhook } from '../../lib/webhookDispatcher'
 import { saveSessionMeta, loadSessionMeta, deleteSessionMeta, listStoredSessions, updateSessionMeta } from '../../lib/sessionStore'
 import { logger, orgLogger } from '../../lib/logger'
 import {
-  isValidWebhookUrl,
   requireWebhookUrl,
   WEBHOOK_URL_REQUIRED,
 } from '../../lib/webhookUrl'
+import { resolveSessionWebhookUrl } from '../../lib/sessionWebhookUrl'
 
 interface MetaCloudConfig {
   accessToken: string
@@ -159,9 +159,10 @@ export class MetaCloudProvider implements WhatsAppProvider {
       const meta = loadSessionMeta(orgId)
       if (!meta || meta.provider !== 'meta-cloud') continue
 
-      if (!isValidWebhookUrl(meta.webhookUrl)) {
-        const lastError = `${WEBHOOK_URL_REQUIRED}: persisted meta has no usable webhookUrl`
-        logger.error({ orgId }, 'Skipping Meta Cloud restore: session meta has no usable webhookUrl')
+      const webhookUrl = await resolveSessionWebhookUrl(orgId)
+      if (!webhookUrl) {
+        const lastError = `${WEBHOOK_URL_REQUIRED}: registry and persisted meta have no usable webhookUrl`
+        logger.error({ orgId }, 'Skipping Meta Cloud restore: no usable webhookUrl')
         this.sessions.set(orgId, {
           orgId,
           provider: 'meta-cloud',
@@ -172,7 +173,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
       }
 
       try {
-        await this.start(orgId, meta.webhookUrl, {
+        await this.start(orgId, webhookUrl, {
           accessToken: meta.metaAccessToken,
           phoneNumberId: meta.metaPhoneNumberId,
           wabaId: meta.metaWabaId,

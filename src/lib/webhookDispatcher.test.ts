@@ -1,11 +1,14 @@
 import assert from 'assert'
 import {
+  appendWebhookSecret,
   attemptPost,
   buildWebhookHeaders,
+  clearSessionWebhookSecret,
   clearWebhookFailures,
   getWebhookFailures,
   normalizeJumpstartInboundWebhookUrl,
   postWebhook,
+  setSessionWebhookSecret,
 } from './webhookDispatcher'
 import type { WebhookHealthResult } from './webhookHealth'
 import { redactWebhookUrl } from './webhookUrl'
@@ -148,14 +151,45 @@ function testHeadersAndUrlSanitization(): void {
     const redacted = redactWebhookUrl(`${URL}?secret=sensitive-query-value&x=1`)
     assert.ok(redacted.includes('secret=***'))
     assert.ok(!redacted.includes('sensitive-query-value'))
+
+    const assembled = appendWebhookSecret(`${URL}?secret=legacy-value&x=1`, 'stored-column-value')
+    assert.strictEqual(new globalThis.URL(assembled).searchParams.get('secret'), 'stored-column-value')
+    const assembledRedacted = redactWebhookUrl(assembled)
+    assert.ok(!assembledRedacted.includes('stored-column-value'))
+    assert.ok(assembledRedacted.includes('secret=***'))
   } finally {
     if (previous === undefined) delete process.env.WA_INCOMING_SECRET
     else process.env.WA_INCOMING_SECRET = previous
   }
 }
 
+async function testDispatchRecombinesRegistrySecret(): Promise<void> {
+  const sessionKey = 'wm-dispatch-secret-test'
+  const requestedUrls: string[] = []
+  const fetchImpl = (async (input: string | URL | Request) => {
+    requestedUrls.push(String(input))
+    return response(200)
+  }) as typeof fetch
+
+  setSessionWebhookSecret(sessionKey, 'stored-column-value')
+  try {
+    await postWebhook(
+      `${URL}?secret=legacy-value&x=1`,
+      { orgId: sessionKey, event: 'message' },
+      { fetchImpl, sleep: noSleep, persistHealth: async () => undefined }
+    )
+    assert.strictEqual(requestedUrls.length, 1)
+    const dispatched = new globalThis.URL(requestedUrls[0])
+    assert.strictEqual(dispatched.searchParams.get('secret'), 'stored-column-value')
+    assert.strictEqual(dispatched.searchParams.get('x'), '1')
+  } finally {
+    clearSessionWebhookSecret(sessionKey)
+  }
+}
+
 async function main(): Promise<void> {
   testHeadersAndUrlSanitization()
+  await testDispatchRecombinesRegistrySecret()
   await testClassifications()
   await testRetriesAndNonBlockingTelemetry()
   console.log('webhookDispatcher.test.ts: all checks passed')
