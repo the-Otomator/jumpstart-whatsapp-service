@@ -35,8 +35,12 @@ import { WA_SEND_TIMEOUT_MS, withTimeout } from '../../lib/withTimeout'
 import {
   type ExtendedMessageKey,
   resolveGroupInbound,
+  resolveInboundPhone,
+  resolveWebhookFrom,
+  contactPhoneDigits,
   jidLocalPart,
   pickPnDigits,
+  isLidJid,
 } from '../../lib/groupInbound'
 import { getCachedSubject, setCachedSubject } from '../../lib/groupSubjectCache'
 import {
@@ -248,7 +252,9 @@ export class BaileysProvider implements WhatsAppProvider {
         this.intentionallyStoppedOrgIds.delete(orgId)
         this.lastOpenAtMs.set(orgId, Date.now())
         session.status = 'connected'
-        session.phoneNumber = sock.user?.id?.split(':')[0]
+        // v7 Contact.id may be @lid; prefer phoneNumber for CRM/session meta.
+        session.phoneNumber =
+          contactPhoneDigits(sock.user) ?? sock.user?.id?.split(':')[0]
         session.qr = undefined
         log.info({ phone: session.phoneNumber }, 'Session connected')
 
@@ -347,28 +353,18 @@ export class BaileysProvider implements WhatsAppProvider {
           log.debug({ key: msg.key }, 'group inbound without @g.us jid')
         }
 
-        const isLid = from.endsWith('@lid')
-          || String(msg.key.participant ?? '').endsWith('@lid')
+        const isLid = isLidJid(from) || isLidJid(String(msg.key.participant ?? ''))
 
-        let senderPn: string | null = pickPnDigits(
-          keyAny.senderPn,
-          keyAny.remoteJidAlt,
-          isGroup ? undefined : (from.endsWith('@s.whatsapp.net') ? from : undefined),
-        )
-        let participantPn: string | null = isGroup
-          ? pickPnDigits(keyAny.participantPn, keyAny.participantAlt, msg.key.participant)
-          : null
+        let senderPn = resolveInboundPhone(keyAny, false)
+        let participantPn = isGroup ? resolveInboundPhone(keyAny, true) : null
 
-        // Fallback: Baileys LID↔PN mapping store (present on some 6.7+/7.x builds).
+        // Fallback: Baileys v7 LID↔PN mapping store (signalRepository.lidMapping).
+        const lidStore = sock.signalRepository?.lidMapping
         if (isLid && !senderPn && !isGroup) {
           try {
-            const store = (sock as unknown as {
-              signalRepository?: { lidMapping?: { getPNForLID?: (lid: string) => Promise<string | null> | string | null } }
-            }).signalRepository?.lidMapping
-            const lidJid = from.endsWith('@lid') ? from : (keyAny.senderLid ?? null)
-            if (store?.getPNForLID && lidJid) {
-              const mapped = await Promise.resolve(store.getPNForLID(lidJid))
-              senderPn = pickPnDigits(mapped)
+            const lidJid = isLidJid(from) ? from : (keyAny.senderLid ?? null)
+            if (lidStore?.getPNForLID && lidJid) {
+              senderPn = pickPnDigits(await lidStore.getPNForLID(lidJid))
             }
           } catch (err) {
             log.debug({ err: (err as Error).message }, 'lidMapping.getPNForLID failed')
@@ -376,24 +372,26 @@ export class BaileysProvider implements WhatsAppProvider {
         }
         if (isGroup && isLid && !participantPn) {
           try {
-            const store = (sock as unknown as {
-              signalRepository?: { lidMapping?: { getPNForLID?: (lid: string) => Promise<string | null> | string | null } }
-            }).signalRepository?.lidMapping
-            const lidJid = String(msg.key.participant ?? '').endsWith('@lid')
+            const lidJid = isLidJid(String(msg.key.participant ?? ''))
               ? String(msg.key.participant)
               : null
-            if (store?.getPNForLID && lidJid) {
-              const mapped = await Promise.resolve(store.getPNForLID(lidJid))
-              participantPn = pickPnDigits(mapped)
+            if (lidStore?.getPNForLID && lidJid) {
+              participantPn = pickPnDigits(await lidStore.getPNForLID(lidJid))
             }
           } catch {
             // best-effort
           }
         }
 
-        const senderPhone = isGroup
-          ? (participantPn ?? jidLocalPart(msg.key.participant ?? ''))
-          : jidLocalPart(from)
+        // `remoteJid` may be a LID. Prefer PN companion fields / mapping store
+        // so downstream contact matching receives a phone, not a LID local-part.
+        const senderPhone = resolveWebhookFrom({
+          isGroup,
+          remoteJid: from,
+          participant: msg.key.participant,
+          senderPn,
+          participantPn,
+        })
 
         const textContent = extractTextContent(msg.message)
         const mediaType = detectMediaType(msg.message)
@@ -419,6 +417,7 @@ export class BaileysProvider implements WhatsAppProvider {
           message: textContent,
           timestamp: messageTimestampSec,
           isGroup,
+          isLid,
           senderPn: isGroup ? (participantPn ?? senderPn) : senderPn,
           isBackfill: backfill.isBackfill,
           // When true, Hub must persist but must not enqueue for auto-task pipeline.
@@ -533,8 +532,13 @@ export class BaileysProvider implements WhatsAppProvider {
 
     sock.ev.on('group-participants.update', async (ev) => {
       const systemJid = sock.user?.id ?? ''
-      const botRemoved =
-        ev.action === 'remove' && ev.participants.includes(systemJid)
+      const botRemoved = ev.action === 'remove' && ev.participants.some((participant) => {
+        if (!systemJid) return false
+        return participant.id === systemJid
+          || participant.phoneNumber === systemJid
+          || jidLocalPart(participant.id) === jidLocalPart(systemJid)
+          || jidLocalPart(participant.phoneNumber ?? '') === jidLocalPart(systemJid)
+      })
 
       if (botRemoved) {
         log.warn({ groupJid: ev.id }, 'System number was kicked from group')
@@ -548,8 +552,10 @@ export class BaileysProvider implements WhatsAppProvider {
           orgId,
           groupJid: ev.id,
           action: ev.action,
-          participants: ev.participants,
-          by: (ev as any).author ?? null,
+          // v7 participants are Contact objects. Preserve the previous wire
+          // format while favouring their PN whenever Baileys supplies one.
+          participants: ev.participants.map((participant) => participant.phoneNumber ?? participant.id),
+          by: ev.authorPn ?? ev.author ?? null,
           bot_removed: botRemoved,
         })
       }

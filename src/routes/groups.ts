@@ -17,6 +17,7 @@ import {
   groupMemberAddModeSchema,
 } from '../middleware/validate'
 import { toJid, jidToPhone } from '../lib/phone'
+import { contactPhoneDigits } from '../lib/groupInbound'
 import { orgLogger } from '../lib/logger'
 import type {
   GroupCreateRequest,
@@ -127,7 +128,7 @@ router.post(
 
       // Build per-participant status from group metadata
       const participantResults: GroupParticipantResult[] = (group.participants ?? []).map((p: any) => ({
-        phone: jidToPhone(p.id),
+        phone: contactPhoneDigits(p) ?? jidToPhone(p.id),
         status: 'added',
       }))
 
@@ -317,7 +318,7 @@ router.get(
       const meta = await sock.groupMetadata(groupJid)
 
       const participants: GroupMetadataParticipant[] = meta.participants.map((p: any) => ({
-        phone: jidToPhone(p.id),
+        phone: contactPhoneDigits(p) ?? jidToPhone(p.phoneNumber ?? p.id),
         isAdmin: p.admin === 'admin' || p.admin === 'superadmin',
         isSuperAdmin: p.admin === 'superadmin',
       }))
@@ -326,7 +327,7 @@ router.get(
         subject: meta.subject,
         description: meta.desc ?? null,
         participants,
-        owner: meta.owner ? jidToPhone(meta.owner) : null,
+        owner: contactPhoneDigits({ id: meta.owner ?? '', phoneNumber: meta.ownerPn }) ?? null,
         announce: meta.announce ?? null,
         restrict: meta.restrict ?? null,
         memberAddMode: meta.memberAddMode ?? null,
@@ -406,7 +407,7 @@ router.get(
 
         const admins = meta.participants
           .filter((p: any) => p.admin != null)
-          .map((p: any) => jidToPhone(p.id))
+          .map((p: any) => contactPhoneDigits(p) ?? jidToPhone(p.id))
 
         admined.push({
           groupJid,
