@@ -30,12 +30,7 @@ export function verifyMetaSignature(rawBody: Buffer, signatureHeader: string | u
     .update(rawBody)
     .digest('hex')
 
-  try {
-    return crypto.timingSafeEqual(
-      Buffer.from(receivedSig, 'hex'),
-      Buffer.from(expectedSig, 'hex'),
-    )
-  } catch {
-    return false
-  }
+  const received = Buffer.from(receivedSig, 'hex')
+  const expected = Buffer.from(expectedSig, 'hex')
+  return received.length === expected.length && crypto.timingSafeEqual(received, expected)
 }

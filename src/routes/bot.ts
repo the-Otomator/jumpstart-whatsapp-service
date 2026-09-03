@@ -8,8 +8,6 @@ router.post('/process', async (req: Request, res: Response) => {
   const body = req.body
   const {
     organizationId,
-    tenantUrl,
-    tenantServiceKey,
     conversationId,
     messageId,
     messageBody,
@@ -20,8 +18,6 @@ router.post('/process', async (req: Request, res: Response) => {
 
   if (
     !organizationId ||
-    !tenantUrl ||
-    !tenantServiceKey ||
     !conversationId ||
     !messageId ||
     !contactPhone ||
@@ -29,6 +25,14 @@ router.post('/process', async (req: Request, res: Response) => {
     !orgIdOnDevice
   ) {
     res.status(400).json({ ok: false, error: 'Missing required fields' })
+    return
+  }
+
+  const tenantUrl = process.env.BOT_SUPABASE_URL?.trim()
+  const tenantServiceKey = process.env.BOT_SUPABASE_SERVICE_KEY?.trim()
+  if (!tenantUrl || !tenantServiceKey) {
+    logger.error('BOT_SUPABASE_URL or BOT_SUPABASE_SERVICE_KEY is not configured')
+    res.status(503).json({ ok: false, error: 'Bot service is not configured' })
     return
   }
 

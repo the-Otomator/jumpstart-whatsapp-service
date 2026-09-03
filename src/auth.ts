@@ -1,11 +1,12 @@
 import { Request, Response, NextFunction } from 'express'
-import { createHash, timingSafeEqual } from 'crypto'
+import { timingSafeEqual } from 'crypto'
 import { logger } from './lib/logger'
 
-function credentialMatches(token: string, credential: string): boolean {
-  const tokenDigest = createHash('sha256').update(token, 'utf8').digest()
-  const credentialDigest = createHash('sha256').update(credential, 'utf8').digest()
-  return timingSafeEqual(tokenDigest, credentialDigest)
+export function credentialMatches(token: string, credential: string): boolean {
+  const tokenBuffer = Buffer.from(token, 'utf8')
+  const credentialBuffer = Buffer.from(credential, 'utf8')
+  return tokenBuffer.length === credentialBuffer.length
+    && timingSafeEqual(tokenBuffer, credentialBuffer)
 }
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
