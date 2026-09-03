@@ -18,6 +18,9 @@ export interface WaSenderRateConfig {
   /** Random delay between marketing sends (seconds) */
   jitterMinSec: number
   jitterMaxSec: number
+  /** Random delay between operational sends (seconds) */
+  operationalJitterMinSec: number
+  operationalJitterMaxSec: number
   /** Consecutive send failures before emergency brake */
   maxConsecutiveFailures: number
   /** Health score threshold for green status / warm-up advance */
@@ -47,6 +50,7 @@ export interface PoolPersistedState {
   marketingSentToday: number
   marketingSentTimestamps: number[]
   lastMarketingSendAt?: number
+  lastOperationalSendAt?: number
   createdAt: string
   updatedAt: string
 }
@@ -56,6 +60,8 @@ export interface QueuedJob {
   req: SendMessageRequest
   lane: MessageLane
   enqueuedAt: number
+  /** Per-message operational gap sampled when the job is queued */
+  operationalGapMs?: number
   resolve: (messageId: string) => void
   reject: (err: Error) => void
 }
@@ -94,6 +100,12 @@ export interface PoolStatusResponse {
   dailyCap: number
   marketingSentToday: number
   queueDepth: { operational: number; marketing: number }
+  operationalSpacing: {
+    minGapSec: number
+    maxGapSec: number
+    lastSendAt?: number
+    nextSendInMs: number
+  }
   health: PoolHealthMetrics
   rateConfig: WaSenderRateConfig
 }

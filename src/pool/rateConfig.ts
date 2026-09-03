@@ -9,6 +9,8 @@ export const DEFAULT_WA_SENDER_RATE_CONFIG: WaSenderRateConfig = {
   warmupStageDays: 7,
   jitterMinSec: 20,
   jitterMaxSec: 90,
+  operationalJitterMinSec: 3,
+  operationalJitterMaxSec: 8,
   maxConsecutiveFailures: 3,
   healthGreenThreshold: 70,
 }

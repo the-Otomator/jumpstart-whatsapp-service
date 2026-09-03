@@ -32,6 +32,20 @@ import type {
 
 const pools = new Map<string, SenderPool>()
 
+export interface SenderPoolDependencies {
+  now: () => number
+  random: () => number
+  sleep: (ms: number) => Promise<void>
+  sendMessage: typeof sendWhatsAppMessageDirect
+}
+
+const defaultDependencies: SenderPoolDependencies = {
+  now: Date.now,
+  random: Math.random,
+  sleep,
+  sendMessage: sendWhatsAppMessageDirect,
+}
+
 export function getSenderPool(orgId: string): SenderPool {
   let pool = pools.get(orgId)
   if (!pool) {
@@ -48,9 +62,11 @@ export class SenderPool {
   private marketingQueue: QueuedJob[] = []
   private processing = false
   private processorTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly dependencies: SenderPoolDependencies
 
-  constructor(orgId: string) {
+  constructor(orgId: string, dependencies: Partial<SenderPoolDependencies> = {}) {
     this.orgId = orgId
+    this.dependencies = { ...defaultDependencies, ...dependencies }
     this.state = resetMarketingDayIfNeeded(loadPoolState(orgId))
     this.maybeAdvanceWarmup()
     savePoolState(this.state)
@@ -70,6 +86,12 @@ export class SenderPool {
       queueDepth: {
         operational: this.operationalQueue.length,
         marketing: this.marketingQueue.length,
+      },
+      operationalSpacing: {
+        minGapSec: DEFAULT_WA_SENDER_RATE_CONFIG.operationalJitterMinSec,
+        maxGapSec: DEFAULT_WA_SENDER_RATE_CONFIG.operationalJitterMaxSec,
+        lastSendAt: this.state.lastOperationalSendAt,
+        nextSendInMs: this.operationalWaitMs(this.operationalQueue[0]),
       },
       health: { ...this.state.health },
       rateConfig: { ...DEFAULT_WA_SENDER_RATE_CONFIG },
@@ -101,7 +123,8 @@ export class SenderPool {
         id: randomUUID(),
         req,
         lane,
-        enqueuedAt: Date.now(),
+        enqueuedAt: this.dependencies.now(),
+        operationalGapMs: lane === 'operational' ? this.sampleOperationalGapMs() : undefined,
         resolve: settleResolve,
         reject: settleReject,
       }
@@ -196,25 +219,32 @@ export class SenderPool {
         const job = this.pickNextJob()
         if (!job) break
 
-        if (job.lane === 'marketing') {
+        if (job.lane === 'operational') {
+          const waitMs = this.operationalWaitMs(job)
+          if (waitMs > 0) {
+            this.requeueFront(job)
+            await this.dependencies.sleep(Math.min(waitMs, 5000))
+            break
+          }
+        } else {
           const waitMs = this.marketingWaitMs()
           if (waitMs > 0) {
             this.requeueFront(job)
-            await sleep(Math.min(waitMs, 5000))
+            await this.dependencies.sleep(Math.min(waitMs, 5000))
             break
           }
 
           const allowed = this.canSendMarketing()
           if (!allowed.ok) {
             this.requeueFront(job)
-            await sleep(Math.min(allowed.retryInMs, 30_000))
+            await this.dependencies.sleep(Math.min(allowed.retryInMs, 30_000))
             break
           }
         }
 
         try {
           const messageId = await withTimeout(
-            sendWhatsAppMessageDirect(job.req),
+            this.dependencies.sendMessage(job.req),
             WA_SEND_TIMEOUT_MS,
             'send_timeout'
           )
@@ -277,11 +307,27 @@ export class SenderPool {
       config.jitterMinSec +
       Math.random() * (config.jitterMaxSec - config.jitterMinSec)
     const minGapMs = jitterSec * 1000
-    const elapsed = Date.now() - this.state.lastMarketingSendAt
+    const elapsed = this.dependencies.now() - this.state.lastMarketingSendAt
     return Math.max(0, minGapMs - elapsed)
   }
 
-  private canSendMarketing(now = Date.now()): { ok: true } | { ok: false; retryInMs: number } {
+  private sampleOperationalGapMs(): number {
+    const config = DEFAULT_WA_SENDER_RATE_CONFIG
+    const jitterSec =
+      config.operationalJitterMinSec +
+      this.dependencies.random() *
+        (config.operationalJitterMaxSec - config.operationalJitterMinSec)
+    return jitterSec * 1000
+  }
+
+  private operationalWaitMs(job?: QueuedJob): number {
+    if (!job || !this.state.lastOperationalSendAt) return 0
+    const minGapMs = job.operationalGapMs ?? this.sampleOperationalGapMs()
+    const elapsed = this.dependencies.now() - this.state.lastOperationalSendAt
+    return Math.max(0, minGapMs - elapsed)
+  }
+
+  private canSendMarketing(now = this.dependencies.now()): { ok: true } | { ok: false; retryInMs: number } {
     const config = DEFAULT_WA_SENDER_RATE_CONFIG
     const timestamps = this.state.marketingSentTimestamps
     const minuteCount = timestamps.filter((t) => t >= now - 60_000).length
@@ -305,7 +351,7 @@ export class SenderPool {
   }
 
   private onSendSuccess(lane: MessageLane): void {
-    const now = Date.now()
+    const now = this.dependencies.now()
     if (lane === 'marketing') {
       this.state.marketingSentTimestamps.push(now)
       this.state.marketingSentTimestamps = this.state.marketingSentTimestamps.filter(
@@ -313,6 +359,8 @@ export class SenderPool {
       )
       this.state.marketingSentToday += 1
       this.state.lastMarketingSendAt = now
+    } else {
+      this.state.lastOperationalSendAt = now
     }
     this.state.health = recordDeliverySuccess(this.state.health)
     this.maybeAdvanceWarmup()
@@ -365,7 +413,7 @@ export class SenderPool {
     })
   }
 
-  private maybeAdvanceWarmup(now = Date.now()): void {
+  private maybeAdvanceWarmup(now = this.dependencies.now()): void {
     const config = DEFAULT_WA_SENDER_RATE_CONFIG
     if (this.state.warmupStage >= 3) return
     if (this.state.health.status !== 'green') return
