@@ -163,6 +163,7 @@ export function buildWebhookHeaders(
     const secret = process.env.WA_INCOMING_SECRET ?? ''
     if (!hasQuerySecret && secret) {
       headers['Authorization'] = `Bearer ${secret}`
+      headers['x-webhook-secret'] = secret
     }
   }
 

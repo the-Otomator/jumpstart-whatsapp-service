@@ -270,8 +270,10 @@ function validRuntimeBuildValue(value: string | undefined): string | undefined {
   return normalized && normalized !== 'unknown' ? normalized : undefined
 }
 
-// Connect page uses a short-lived HMAC query token and a dedicated rate limit.
-app.use('/connect', connectLimiter, connectRoutes)
+// Limit connect page loads, but keep token-authenticated status polling on its
+// own per-session limiter inside the connect router.
+app.get('/connect/:orgId', connectLimiter)
+app.use('/connect', connectRoutes)
 
 // Meta Cloud API webhook (no auth - called by Meta directly)
 app.use('/meta-webhook', metaWebhookRoutes)
@@ -281,7 +283,7 @@ app.use('/webhooks/meta', metaWebhooksRouter)
 
 // API routes (auth + rate limit)
 app.use('/api', apiLimiter, authMiddleware)
-app.post('/api/connect-token', createConnectToken)
+app.post('/api/connect-token', connectLimiter, createConnectToken)
 app.get('/api/health', detailedHealth)
 app.use('/api/sessions', sessionRoutes)
 app.use('/api/messages', messageRoutes)

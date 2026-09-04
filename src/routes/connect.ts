@@ -1,5 +1,7 @@
 ﻿import { Router, Request, Response } from 'express'
 import { createHmac, timingSafeEqual } from 'crypto'
+import type { NextFunction } from 'express'
+import { rateLimit } from 'express-rate-limit'
 import { getStatus, startSession } from '../sessionManager'
 import { orgLogger } from '../lib/logger'
 import { validateOrg } from '../lib/supabase'
@@ -19,7 +21,7 @@ function signConnectToken(orgId: string, expUnix: number, secret: string): strin
   return createHmac('sha256', secret).update(`${orgId}:${expUnix}`, 'utf8').digest('hex')
 }
 
-function mintConnectToken(orgId: string): { token: string; expiresAt: string } | null {
+export function mintConnectToken(orgId: string): { token: string; expiresAt: string } | null {
   const secret = connectTokenSecret()
   if (!secret) return null
   const expUnix = Math.floor(Date.now() / 1000) + CONNECT_TOKEN_TTL_SECONDS
@@ -74,13 +76,27 @@ function requireConnectToken(req: Request, res: Response): boolean {
   return true
 }
 
+function requireConnectTokenMiddleware(req: Request, res: Response, next: NextFunction): void {
+  if (requireConnectToken(req, res)) next()
+}
+
+// The connect page polls every two seconds. Five requests per five-second
+// window preserves that cadence while bounding bursts per signed session.
+const connectStatusLimiter = rateLimit({
+  windowMs: 5 * 1000,
+  limit: 5,
+  keyGenerator: (req) => `${req.params.orgId}:${String(req.query.t)}`,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many status requests', code: 'RATE_LIMITED' },
+})
+
 /**
  * GET /connect/:orgId/status (JSON)
  * Polled by the connect page to get live status + QR.
  * Registered before `/:orgId` so paths like `/uuid/status` never match a greedy `:orgId`.
  */
-router.get('/:orgId/status', (req: Request, res: Response) => {
-  if (!requireConnectToken(req, res)) return
+router.get('/:orgId/status', requireConnectTokenMiddleware, connectStatusLimiter, (req: Request, res: Response) => {
   const { orgId } = req.params
   const session = getStatus(orgId)
   if (!session) {
@@ -288,6 +304,13 @@ ${CONNECT_PAGE_MARKER}
       <p style="color:#888;font-size:14px;">Session does not exist. Click to start.</p>
       <button class="retry-btn" onclick="location.reload()">Start connection</button>
     </div>
+
+    <div id="state-error" class="state">
+      <div class="connected-icon">&#10060;</div>
+      <h2 style="margin-bottom:8px;">Connection error</h2>
+      <p style="color:#888;font-size:14px;">The connection could not be completed. Please retry.</p>
+      <button class="retry-btn" onclick="location.reload()">Retry</button>
+    </div>
   </div>
 
   <script>
@@ -332,6 +355,10 @@ ${CONNECT_PAGE_MARKER}
               setState('connected');
               var phone = data.phoneNumber || '';
               document.getElementById('phone-display').textContent = '+' + phone;
+              clearInterval(pollInterval);
+              break;
+            case 'error':
+              setState('error');
               clearInterval(pollInterval);
               break;
             case 'disconnected':

@@ -56,6 +56,7 @@ async function testStartRejectsMissingWebhook(): Promise<void> {
 async function testRestoreSkipsMissingWebhook(): Promise<void> {
   const prevCwd = process.cwd()
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-webhook-integrity-'))
+  const originalResolver = sessionWebhookUrl.resolveSessionWebhookUrl
   process.chdir(tmp)
 
   try {
@@ -77,6 +78,7 @@ async function testRestoreSkipsMissingWebhook(): Promise<void> {
     fs.writeFileSync(path.join(dir, 'creds.json'), '{}', 'utf-8')
 
     const provider = getBaileys()
+    ;(sessionWebhookUrl as any).resolveSessionWebhookUrl = async () => undefined
     await provider.restoreSessions()
 
     const session = provider.getStatus(orgId)
@@ -88,6 +90,7 @@ async function testRestoreSkipsMissingWebhook(): Promise<void> {
     )
     assert.strictEqual(provider.getSocket(orgId), undefined, 'must not create a socket')
   } finally {
+    ;(sessionWebhookUrl as any).resolveSessionWebhookUrl = originalResolver
     process.chdir(prevCwd)
     fs.rmSync(tmp, { recursive: true, force: true })
   }
