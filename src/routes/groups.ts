@@ -19,6 +19,7 @@ import {
 import { toJid, jidToPhone } from '../lib/phone'
 import { contactPhoneDigits } from '../lib/groupInbound'
 import { orgLogger } from '../lib/logger'
+import { assertSafeOutboundUrl } from '../lib/webhookDispatcher'
 import type {
   GroupCreateRequest,
   GroupParticipantsRequest,
@@ -107,7 +108,8 @@ router.post(
       // Set icon if URL provided
       if (body.iconUrl) {
         try {
-          const resp = await fetch(body.iconUrl)
+          assertSafeOutboundUrl(body.iconUrl)
+          const resp = await fetch(body.iconUrl, { redirect: 'error' })
           if (resp.ok) {
             const buf = Buffer.from(await resp.arrayBuffer())
             await sock.updateProfilePicture(groupJid, buf)
@@ -509,7 +511,8 @@ router.post(
     if (!sock) return
 
     try {
-      const imgRes = await fetch(url)
+      assertSafeOutboundUrl(url)
+      const imgRes = await fetch(url, { redirect: 'error' })
       if (!imgRes.ok) {
         res.status(400).json({ error: 'Failed to fetch icon URL', code: 'ICON_FETCH_FAILED' })
         return

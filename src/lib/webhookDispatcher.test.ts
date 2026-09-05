@@ -14,6 +14,7 @@ import type { WebhookHealthResult } from './webhookHealth'
 import { redactWebhookUrl } from './webhookUrl'
 
 const URL = 'https://example.test/functions/v1/wa-webhook'
+const ALLOWED_URL = 'https://api.jumpstart.co.il/functions/v1/wa-webhook'
 const ORG = 'org-test'
 const noSleep = async (): Promise<void> => undefined
 
@@ -123,7 +124,12 @@ function testHeadersAndUrlSanitization(): void {
   try {
     const headers = buildWebhookHeaders(URL, { orgId: ORG, event: 'webhook.probe' })
     assert.strictEqual(headers['x-wa-session-key'], ORG)
-    assert.strictEqual(headers.Authorization, 'Bearer non-production-test-value')
+    assert.ok(!headers.Authorization, 'non-allow-listed hosts must not receive Authorization')
+    assert.ok(!headers['x-webhook-secret'], 'non-allow-listed hosts must not receive x-webhook-secret')
+
+    const allowedHeaders = buildWebhookHeaders(ALLOWED_URL, { orgId: ORG, event: 'webhook.probe' })
+    assert.strictEqual(allowedHeaders.Authorization, 'Bearer non-production-test-value')
+    assert.strictEqual(allowedHeaders['x-webhook-secret'], 'non-production-test-value')
 
     // Two connected Baileys devices in one org must send *their own* session_key,
     // not the bare organization UUID. Exact match on wa-webhook depends on this.
@@ -142,6 +148,7 @@ function testHeadersAndUrlSanitization(): void {
 
     const withQuery = buildWebhookHeaders(`${URL}?secret=query-value`, { orgId: ORG })
     assert.ok(!withQuery.Authorization, 'query-secret URLs keep existing no-Bearer behavior')
+    assert.ok(!withQuery['x-webhook-secret'], 'query-secret URLs keep existing no-header behavior')
 
     const normalized = normalizeJumpstartInboundWebhookUrl(
       'https://example.test/functions/v1/whatsapp-incoming'
@@ -174,7 +181,7 @@ async function testDispatchRecombinesRegistrySecret(): Promise<void> {
   setSessionWebhookSecret(sessionKey, 'stored-column-value')
   try {
     await postWebhook(
-      `${URL}?secret=legacy-value&x=1`,
+      `${ALLOWED_URL}?secret=legacy-value&x=1`,
       { orgId: sessionKey, event: 'message' },
       { fetchImpl, sleep: noSleep, persistHealth: async () => undefined }
     )

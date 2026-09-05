@@ -154,6 +154,13 @@ router.post(
     }
 
     const orgCheck = await validateOrg(orgId)
+    if (orgCheck.unavailable) {
+      res.status(503).json({
+        error: 'Organization validation is temporarily unavailable',
+        code: 'ORG_VALIDATION_UNAVAILABLE',
+      })
+      return
+    }
     if (!orgCheck.valid) {
       res.status(403).json({
         error: 'No active subscription for this organization',
@@ -292,6 +299,13 @@ router.post(
     }
 
     const orgCheck = await validateOrg(targetOrgId)
+    if (orgCheck.unavailable) {
+      res.status(503).json({
+        error: 'Organization validation is temporarily unavailable',
+        code: 'ORG_VALIDATION_UNAVAILABLE',
+      })
+      return
+    }
     if (!orgCheck.valid) {
       res.status(403).json({
         error: 'No active subscription for target organization',

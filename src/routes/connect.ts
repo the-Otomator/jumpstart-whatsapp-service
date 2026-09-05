@@ -1,5 +1,8 @@
 ﻿import { Router, Request, Response } from 'express'
-import { getQR, getStatus, startSession, stopSession } from '../sessionManager'
+import { createHmac, timingSafeEqual } from 'crypto'
+import type { NextFunction } from 'express'
+import { rateLimit } from 'express-rate-limit'
+import { getStatus, startSession } from '../sessionManager'
 import { orgLogger } from '../lib/logger'
 import { validateOrg } from '../lib/supabase'
 import { resolveSessionWebhookUrl } from '../lib/sessionWebhookUrl'
@@ -7,13 +10,93 @@ import { WEBHOOK_URL_REQUIRED } from '../lib/webhookUrl'
 
 const router = Router()
 const CONNECT_PAGE_MARKER = '<!-- connect-v3 -->'
+const CONNECT_TOKEN_TTL_SECONDS = 15 * 60
+
+function connectTokenSecret(): string | null {
+  const secret = process.env.CONNECT_TOKEN_SECRET?.trim()
+  return secret ? secret : null
+}
+
+function signConnectToken(orgId: string, expUnix: number, secret: string): string {
+  return createHmac('sha256', secret).update(`${orgId}:${expUnix}`, 'utf8').digest('hex')
+}
+
+export function mintConnectToken(orgId: string): { token: string; expiresAt: string } | null {
+  const secret = connectTokenSecret()
+  if (!secret) return null
+  const expUnix = Math.floor(Date.now() / 1000) + CONNECT_TOKEN_TTL_SECONDS
+  return {
+    token: `${expUnix}.${signConnectToken(orgId, expUnix, secret)}`,
+    expiresAt: new Date(expUnix * 1000).toISOString(),
+  }
+}
+
+function hasValidConnectToken(orgId: string, candidate: unknown): boolean {
+  const secret = connectTokenSecret()
+  if (!secret || typeof candidate !== 'string') return false
+  const match = /^(\d{10})\.([a-f0-9]{64})$/i.exec(candidate)
+  if (!match) return false
+
+  const expUnix = Number(match[1])
+  const nowUnix = Math.floor(Date.now() / 1000)
+  if (!Number.isSafeInteger(expUnix) || expUnix < nowUnix || expUnix > nowUnix + CONNECT_TOKEN_TTL_SECONDS) {
+    return false
+  }
+
+  const received = Buffer.from(match[2].toLowerCase(), 'hex')
+  const expected = Buffer.from(signConnectToken(orgId, expUnix, secret), 'hex')
+  return received.length === expected.length && timingSafeEqual(received, expected)
+}
+
+export function createConnectToken(req: Request, res: Response): void {
+  const orgId = typeof req.body?.orgId === 'string' ? req.body.orgId.trim() : ''
+  if (!orgId) {
+    res.status(400).json({ error: 'orgId is required', code: 'ORG_ID_REQUIRED' })
+    return
+  }
+
+  const minted = mintConnectToken(orgId)
+  if (!minted) {
+    res.status(500).json({ error: 'Connect token service is not configured', code: 'CONNECT_TOKEN_MISCONFIGURED' })
+    return
+  }
+
+  res.json({ orgId, ...minted })
+}
+
+function requireConnectToken(req: Request, res: Response): boolean {
+  if (!connectTokenSecret()) {
+    res.status(503).json({ error: 'Connect token service unavailable', code: 'CONNECT_TOKEN_MISCONFIGURED' })
+    return false
+  }
+  if (!hasValidConnectToken(req.params.orgId, req.query.t)) {
+    res.status(401).json({ error: 'Invalid or expired connect token', code: 'CONNECT_TOKEN_INVALID' })
+    return false
+  }
+  return true
+}
+
+function requireConnectTokenMiddleware(req: Request, res: Response, next: NextFunction): void {
+  if (requireConnectToken(req, res)) next()
+}
+
+// The connect page polls every two seconds. Five requests per five-second
+// window preserves that cadence while bounding bursts per signed session.
+const connectStatusLimiter = rateLimit({
+  windowMs: 5 * 1000,
+  limit: 5,
+  keyGenerator: (req) => `${req.params.orgId}:${String(req.query.t)}`,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many status requests', code: 'RATE_LIMITED' },
+})
 
 /**
  * GET /connect/:orgId/status (JSON)
  * Polled by the connect page to get live status + QR.
  * Registered before `/:orgId` so paths like `/uuid/status` never match a greedy `:orgId`.
  */
-router.get('/:orgId/status', (req: Request, res: Response) => {
+router.get('/:orgId/status', requireConnectTokenMiddleware, connectStatusLimiter, (req: Request, res: Response) => {
   const { orgId } = req.params
   const session = getStatus(orgId)
   if (!session) {
@@ -30,22 +113,26 @@ router.get('/:orgId/status', (req: Request, res: Response) => {
 /**
  * GET /connect/:orgId
  * Self-contained QR onboarding page.
- * No auth -- this is a one-time setup link shared with the client.
- * In production, protect with a short-lived token or restrict to admin portal.
+ * Requires the short-lived HMAC token minted by POST /api/connect-token.
  */
 router.get('/:orgId', async (req: Request, res: Response) => {
+  if (!requireConnectToken(req, res)) return
   const { orgId } = req.params
   const label = normalizeLabel(req.query.label)
   const log = orgLogger(orgId)
 
   const orgCheck = await validateOrg(orgId)
+  if (orgCheck.unavailable) {
+    res.status(503).send(renderErrorPage(orgId, 'Organization validation is temporarily unavailable'))
+    return
+  }
   if (!orgCheck.valid) {
     res.status(403).send(renderErrorPage(orgId, 'No active subscription for this org'))
     return
   }
 
-  // Auto-start session if not running or disconnected.
-  // For disconnected sessions: purge stale creds first so a fresh QR is always generated.
+  // Auto-start session if not running or disconnected. Credential deletion is
+  // reserved for the authenticated session DELETE/logout route.
   const status = getStatus(orgId)
   if (!status || status.status === 'disconnected') {
     const prevStatus = status?.status ?? 'none'
@@ -67,17 +154,13 @@ router.get('/:orgId', async (req: Request, res: Response) => {
 
     log.info({ prevStatus }, 'Auto-starting session from connect page')
     try {
-      if (status?.status === 'disconnected') {
-        stopSession(orgId, { purgeAuthDir: true })
-        await new Promise((r) => setTimeout(r, 500))
-      }
       await startSession(orgId, webhookUrl)
     } catch (err) {
       log.error({ err }, 'Failed to auto-start session from connect page')
     }
   }
 
-  res.send(renderConnectPage(orgId, label))
+  res.send(renderConnectPage(orgId, label, req.query.t as string))
 })
 
 function normalizeLabel(value: unknown): string {
@@ -94,7 +177,7 @@ function escapeHtml(value: string): string {
   })[character]!)
 }
 
-function renderConnectPage(orgId: string, label: string): string {
+function renderConnectPage(orgId: string, label: string, connectToken: string): string {
   const deviceLine = label
     ? `המכשיר &quot;${escapeHtml(label)}&quot; מחובר כעת ל־JumpStart.`
     : 'אפשר לתת למכשיר שם במערכת: הגדרות ← WhatsApp ← מכשירים.'
@@ -221,10 +304,18 @@ ${CONNECT_PAGE_MARKER}
       <p style="color:#888;font-size:14px;">Session does not exist. Click to start.</p>
       <button class="retry-btn" onclick="location.reload()">Start connection</button>
     </div>
+
+    <div id="state-error" class="state">
+      <div class="connected-icon">&#10060;</div>
+      <h2 style="margin-bottom:8px;">Connection error</h2>
+      <p style="color:#888;font-size:14px;">The connection could not be completed. Please retry.</p>
+      <button class="retry-btn" onclick="location.reload()">Retry</button>
+    </div>
   </div>
 
   <script>
-    var orgId = '${orgId}';
+    var orgId = ${JSON.stringify(orgId)};
+    var connectToken = ${JSON.stringify(connectToken)};
     var currentState = 'loading';
     var pollInterval;
     var notFoundCount = 0;
@@ -243,7 +334,7 @@ ${CONNECT_PAGE_MARKER}
     }
 
     function poll() {
-      fetch('/connect/' + orgId + '/status')
+      fetch('/connect/' + encodeURIComponent(orgId) + '/status?t=' + encodeURIComponent(connectToken))
         .then(function(res) { return res.json(); })
         .then(function(data) {
           switch (data.status) {
@@ -264,6 +355,10 @@ ${CONNECT_PAGE_MARKER}
               setState('connected');
               var phone = data.phoneNumber || '';
               document.getElementById('phone-display').textContent = '+' + phone;
+              clearInterval(pollInterval);
+              break;
+            case 'error':
+              setState('error');
               clearInterval(pollInterval);
               break;
             case 'disconnected':

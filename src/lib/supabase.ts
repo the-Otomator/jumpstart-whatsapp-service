@@ -5,7 +5,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  logger.warn('SUPABASE_URL or SUPABASE_SERVICE_KEY not set — org validation disabled')
+  logger.warn('SUPABASE_URL or SUPABASE_SERVICE_KEY not set — org validation unavailable')
 }
 
 export const supabase = (SUPABASE_URL && SUPABASE_SERVICE_KEY)
@@ -22,7 +22,7 @@ export interface WhatsappDeviceLookup {
 
 /** One registry read shared by entitlement validation and webhook resolution. */
 export async function lookupWhatsappDevice(sessionKey: string): Promise<WhatsappDeviceLookup> {
-  if (!supabase) return { orgId: null, webhookUrl: null, webhookSecret: null }
+  if (!supabase) throw new Error('SUPABASE_NOT_CONFIGURED')
 
   const { data, error } = await supabase
     .from('whatsapp_devices')
@@ -32,7 +32,7 @@ export async function lookupWhatsappDevice(sessionKey: string): Promise<Whatsapp
 
   if (error) {
     logger.warn({ sessionKey, err: error.message }, 'Failed to read WhatsApp device registry')
-    return { orgId: null, webhookUrl: null, webhookSecret: null }
+    throw new Error(`DEVICE_LOOKUP_FAILED: ${error.message}`)
   }
 
   return {
@@ -58,11 +58,12 @@ export async function validateOrg(orgId: string): Promise<{
   organizationName?: string
   deviceWebhookUrl: string | null
   deviceWebhookSecret: string | null
+  unavailable?: boolean
 }> {
-  // Dev mode — if no Supabase configured, allow all
+  // Entitlement checks are authorization boundaries and must fail closed.
   if (!supabase) {
-    logger.debug({ orgId }, 'Supabase not configured — skipping org validation')
-    return { valid: true, deviceWebhookUrl: null, deviceWebhookSecret: null }
+    logger.error({ orgId }, 'Supabase not configured — rejecting org validation')
+    return { valid: false, unavailable: true, deviceWebhookUrl: null, deviceWebhookSecret: null }
   }
 
   try {
@@ -80,12 +81,16 @@ export async function validateOrg(orgId: string): Promise<{
       .eq('status', 'active')
       .maybeSingle()
 
-    if (central && !centralErr) {
-      const { data: product } = await supabase
+    if (centralErr) throw new Error(`CENTRAL_SUBSCRIPTION_LOOKUP_FAILED: ${centralErr.message}`)
+
+    if (central) {
+      const { data: product, error: productErr } = await supabase
         .from('products')
         .select('slug')
         .eq('id', central.product_id)
         .maybeSingle()
+
+      if (productErr) throw new Error(`PRODUCT_LOOKUP_FAILED: ${productErr.message}`)
 
       if (product?.slug === 'whatsapp-service') {
         return {
@@ -100,7 +105,7 @@ export async function validateOrg(orgId: string): Promise<{
     }
 
     // Jumpstart system license: WhatsApp device slots on the plan + purchased extras in metadata
-    const { data: oss } = await supabase
+    const { data: oss, error: ossErr } = await supabase
       .from('org_system_subscriptions')
       .select('plan_code, metadata')
       .eq('organization_id', orgId)
@@ -108,13 +113,17 @@ export async function validateOrg(orgId: string): Promise<{
       .eq('status', 'active')
       .maybeSingle()
 
+    if (ossErr) throw new Error(`SYSTEM_SUBSCRIPTION_LOOKUP_FAILED: ${ossErr.message}`)
+
     if (oss) {
-      const { data: planRow } = await supabase
+      const { data: planRow, error: planErr } = await supabase
         .from('system_license_plans')
         .select('features')
         .eq('system_code', 'jumpstart')
         .eq('code', oss.plan_code)
         .maybeSingle()
+
+      if (planErr) throw new Error(`LICENSE_PLAN_LOOKUP_FAILED: ${planErr.message}`)
 
       const features = (planRow?.features ?? {}) as Record<string, unknown>
       const metadata = (oss.metadata ?? {}) as Record<string, unknown>
@@ -136,12 +145,14 @@ export async function validateOrg(orgId: string): Promise<{
     }
 
     // Check 4: Partner org slot (WorkMatch and future partners)
-    const { data: slot } = await supabase
+    const { data: slot, error: slotErr } = await supabase
       .from('partner_org_slots')
       .select('org_id, partner_name, status')
       .eq('org_id', orgId)
       .eq('status', 'active')
       .maybeSingle()
+
+    if (slotErr) throw new Error(`PARTNER_SLOT_LOOKUP_FAILED: ${slotErr.message}`)
 
     if (slot) {
       logger.info({ orgId, partner: slot.partner_name }, 'WhatsApp allowed via partner license')
@@ -161,8 +172,7 @@ export async function validateOrg(orgId: string): Promise<{
     }
   } catch (err) {
     logger.error({ orgId, err }, 'Error validating org against Supabase')
-    // Fail open in case of DB error — don't block the service
-    return { valid: true, deviceWebhookUrl: null, deviceWebhookSecret: null }
+    return { valid: false, unavailable: true, deviceWebhookUrl: null, deviceWebhookSecret: null }
   }
 }
 

@@ -8,11 +8,13 @@ import {
 } from '../middleware/validate'
 import { orgLogger } from '../lib/logger'
 import { getSenderPool } from '../pool'
+import { assertSafeOutboundUrl } from '../lib/webhookDispatcher'
 
 const router = Router()
 
 /** Shared by `POST /api/messages/send` and `POST /api/sessions/:orgId/send`. */
 export async function sendWhatsAppMessage(req: SendMessageRequest): Promise<string> {
+  if (req.mediaUrl) assertSafeOutboundUrl(req.mediaUrl)
   const lane = req.lane ?? 'operational'
   const pool = getSenderPool(req.orgId)
   return pool.enqueueAndWait(req, lane)

@@ -3,6 +3,7 @@ import { verifyMetaSignature } from '../lib/metaWebhookVerify'
 import { getMetaCloudProvider } from '../providers'
 import { postWebhook } from '../lib/webhookDispatcher'
 import { logger } from '../lib/logger'
+import { credentialMatches } from '../auth'
 
 const router = Router()
 
@@ -17,13 +18,17 @@ router.get('/', (req: Request, res: Response) => {
 
   const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN
 
-  if (mode === 'subscribe' && token === verifyToken) {
+  const tokenMatch = typeof token === 'string'
+    && typeof verifyToken === 'string'
+    && verifyToken.length > 0
+    && credentialMatches(token, verifyToken)
+  if (mode === 'subscribe' && tokenMatch) {
     logger.info('Meta webhook (/webhooks/meta) verified successfully')
     res.status(200).send(challenge)
     return
   }
 
-  logger.warn({ mode, tokenMatch: token === verifyToken }, 'Meta webhook verification failed (/webhooks/meta)')
+  logger.warn({ mode, tokenMatch }, 'Meta webhook verification failed (/webhooks/meta)')
   res.status(403).send('Forbidden')
 })
 

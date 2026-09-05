@@ -1,6 +1,7 @@
 import { logger } from './logger'
 import { redactWebhookUrl } from './webhookUrl'
 import { persistWebhookHealth, type WebhookHealthResult } from './webhookHealth'
+import { isIP } from 'net'
 
 export type WebhookDispatchCategory = Extract<
   WebhookHealthResult['category'],
@@ -37,6 +38,69 @@ const failureLog: WebhookFailure[] = []
 const healthWriteChains = new Map<string, Promise<void>>()
 const sessionWebhookSecrets = new Map<string, string>()
 const legacySecretWarnings = new Set<string>()
+const DEFAULT_WEBHOOK_SECRET_ALLOWED_HOSTS = [
+  'api.jumpstart.co.il',
+  'dgxnnwnugdxzeopleera.supabase.co',
+]
+
+function webhookSecretAllowedHosts(): Set<string> {
+  const configured = process.env.WEBHOOK_SECRET_ALLOWED_HOSTS
+  return new Set((configured ? configured.split(',') : DEFAULT_WEBHOOK_SECRET_ALLOWED_HOSTS)
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean))
+}
+
+function isPrivateIpv4(hostname: string): boolean {
+  const octets = hostname.split('.').map(Number)
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    return false
+  }
+  const [a, b] = octets
+  return a === 10
+    || a === 127
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+    || a === 0
+}
+
+/** Validate caller-controlled outbound targets before any fetch or secret attachment. */
+export function assertSafeOutboundUrl(value: string): URL {
+  let parsed: URL
+  try {
+    parsed = new URL(value)
+  } catch {
+    throw new Error('OUTBOUND_URL_INVALID')
+  }
+
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
+    throw new Error('OUTBOUND_URL_UNSAFE')
+  }
+
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  const ipVersion = isIP(hostname)
+  const blockedName = hostname === 'localhost'
+    || hostname.endsWith('.localhost')
+    || hostname.endsWith('.internal')
+    || hostname.endsWith('.local')
+  const blockedIpv4 = ipVersion === 4 && isPrivateIpv4(hostname)
+  const blockedIpv6 = ipVersion === 6 && (
+    hostname === '::1'
+    || hostname === '::'
+    || hostname.startsWith('::ffff:')
+    || /^f[cd][0-9a-f]{2}:/i.test(hostname)
+    || /^fe[89ab][0-9a-f]:/i.test(hostname)
+  )
+
+  if (blockedName || blockedIpv4 || blockedIpv6) {
+    throw new Error('OUTBOUND_URL_UNSAFE')
+  }
+  return parsed
+}
+
+function mayAttachWebhookSecret(url: URL): boolean {
+  return webhookSecretAllowedHosts().has(url.host.toLowerCase())
+}
 
 /** Keep the registry-only credential in memory; never persist it in session meta. */
 export function setSessionWebhookSecret(sessionKey: string, secret: unknown): void {
@@ -88,21 +152,18 @@ export function buildWebhookHeaders(
   payload: Record<string, unknown>
 ): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const parsed = assertSafeOutboundUrl(url)
   const sessionKey = typeof payload.orgId === 'string' ? payload.orgId : undefined
   if (sessionKey && url.includes('/functions/v1/wa-webhook')) {
     headers['x-wa-session-key'] = sessionKey
   }
 
-  if (isJumpstartInboundWebhookPath(url)) {
-    let hasQuerySecret = false
-    try {
-      hasQuerySecret = new URL(url).searchParams.has('secret')
-    } catch {
-      hasQuerySecret = /[?&]secret=/.test(url)
-    }
+  if (isJumpstartInboundWebhookPath(url) && mayAttachWebhookSecret(parsed)) {
+    const hasQuerySecret = parsed.searchParams.has('secret')
     const secret = process.env.WA_INCOMING_SECRET ?? ''
     if (!hasQuerySecret && secret) {
       headers['Authorization'] = `Bearer ${secret}`
+      headers['x-webhook-secret'] = secret
     }
   }
 
@@ -119,12 +180,14 @@ export async function attemptPost(
   try {
     const controller = new AbortController()
     timeout = setTimeout(() => controller.abort(), 10_000)
+    assertSafeOutboundUrl(url)
 
     const response = await fetchImpl(url, {
       method: 'POST',
       headers: buildWebhookHeaders(url, payload as Record<string, unknown>),
       body: JSON.stringify(payload),
       signal: controller.signal,
+      redirect: 'error',
     })
 
     if (!response.ok) {
@@ -165,11 +228,14 @@ export async function postWebhook(
 ): Promise<void> {
   const orgId = payload.orgId as string
   const normalizedUrl = normalizeJumpstartInboundWebhookUrl(webhookUrl)
+  const parsedUrl = assertSafeOutboundUrl(normalizedUrl)
+  const secretHostAllowed = mayAttachWebhookSecret(parsedUrl)
+  if (!secretHostAllowed) parsedUrl.searchParams.delete('secret')
   const webhookSecret = sessionWebhookSecrets.get(orgId)
-  let url = normalizedUrl
-  if (webhookSecret) {
-    const alreadyHasSecret = new URL(normalizedUrl).searchParams.has('secret')
-    url = appendWebhookSecret(normalizedUrl, webhookSecret)
+  let url = parsedUrl.toString()
+  if (webhookSecret && secretHostAllowed) {
+    const alreadyHasSecret = parsedUrl.searchParams.has('secret')
+    url = appendWebhookSecret(url, webhookSecret)
     if (alreadyHasSecret && !legacySecretWarnings.has(orgId)) {
       legacySecretWarnings.add(orgId)
       logger.warn(

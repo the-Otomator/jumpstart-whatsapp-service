@@ -3,7 +3,7 @@ import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import { rateLimit } from 'express-rate-limit'
-import pinoHttp from 'pino-http'
+import pinoHttp, { stdSerializers } from 'pino-http'
 import * as os from 'os'
 import { exec } from 'child_process'
 import { promisify } from 'util'
@@ -14,6 +14,7 @@ import globalmaxRouter from './routes/globalmax'
 import groupRoutes from './routes/groups'
 import contactRoutes from './routes/contacts'
 import connectRoutes from './routes/connect'
+import { createConnectToken } from './routes/connect'
 import metaWebhookRoutes from './routes/meta-webhook'
 import metaWebhooksRouter from './routes/webhooks'
 import templatesRouter from './routes/templates'
@@ -177,6 +178,27 @@ app.use(
 app.use(
   pinoHttp({
     logger: logger as any,
+    serializers: {
+      req(req) {
+        const serialized = stdSerializers.req(req)
+        if (serialized.url?.startsWith('/connect/')) {
+          const parsed = new URL(serialized.url, 'https://local.invalid')
+          if (parsed.searchParams.has('t')) {
+            parsed.searchParams.set('t', '[Redacted]')
+            serialized.url = `${parsed.pathname}${parsed.search}`
+          }
+          const serializedWithQuery = serialized as typeof serialized & { query?: Record<string, unknown> }
+          const query = serializedWithQuery.query
+          if (query?.t) {
+            serializedWithQuery.query = {
+              ...query,
+              t: '[Redacted]',
+            }
+          }
+        }
+        return serialized
+      },
+    },
     autoLogging: {
       ignore: (req) => (req.url ?? '').startsWith('/health'),
     },
@@ -194,8 +216,20 @@ const apiLimiter = rateLimit({
   message: { error: 'Too many requests', code: 'RATE_LIMITED' },
 })
 
+const connectLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many connect requests', code: 'RATE_LIMITED' },
+})
+
 // Health check (no auth)
-app.get('/health', async (_req, res) => {
+app.get('/health', (_req, res) => {
+  res.json({ ok: true })
+})
+
+async function detailedHealth(_req: express.Request, res: express.Response): Promise<void> {
   const sessionList = listActiveSessions()
   const loadAvg = os.loadavg()
   const totalMemoryMB = Math.round(os.totalmem() / 1024 / 1024)
@@ -229,14 +263,16 @@ app.get('/health', async (_req, res) => {
       perSession: getAllCryptoStats(),
     },
   })
-})
+}
 
 function validRuntimeBuildValue(value: string | undefined): string | undefined {
   const normalized = value?.trim()
   return normalized && normalized !== 'unknown' ? normalized : undefined
 }
 
-// Connect page (no auth - onboarding flow)
+// Limit connect page loads, but keep token-authenticated status polling on its
+// own per-session limiter inside the connect router.
+app.get('/connect/:orgId', connectLimiter)
 app.use('/connect', connectRoutes)
 
 // Meta Cloud API webhook (no auth - called by Meta directly)
@@ -247,6 +283,8 @@ app.use('/webhooks/meta', metaWebhooksRouter)
 
 // API routes (auth + rate limit)
 app.use('/api', apiLimiter, authMiddleware)
+app.post('/api/connect-token', connectLimiter, createConnectToken)
+app.get('/api/health', detailedHealth)
 app.use('/api/sessions', sessionRoutes)
 app.use('/api/messages', messageRoutes)
 app.use('/api/globalmax', authMiddleware, globalmaxRouter)

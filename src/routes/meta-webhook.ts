@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express'
 import { getMetaCloudProvider } from '../providers'
 import { logger } from '../lib/logger'
+import { verifyMetaSignature } from '../lib/metaWebhookVerify'
+import { credentialMatches } from '../auth'
 
 // TODO: unify into /webhooks/meta in a follow-up task
 const router = Router()
@@ -16,21 +18,33 @@ router.get('/', (req: Request, res: Response) => {
 
   const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN
 
-  if (mode === 'subscribe' && token === verifyToken) {
+  const tokenMatch = typeof token === 'string'
+    && typeof verifyToken === 'string'
+    && verifyToken.length > 0
+    && credentialMatches(token, verifyToken)
+  if (mode === 'subscribe' && tokenMatch) {
     logger.info('Meta webhook verified successfully')
     res.status(200).send(challenge)
     return
   }
 
-  logger.warn({ mode, tokenMatch: token === verifyToken }, 'Meta webhook verification failed')
+  logger.warn({ mode, tokenMatch }, 'Meta webhook verification failed')
   res.status(403).send('Forbidden')
 })
 
 /**
  * POST /meta-webhook — Incoming messages + status updates
- * No auth — Meta sends these directly. Validation via payload structure.
+ * Public endpoint, authenticated by Meta's X-Hub-Signature-256 HMAC.
  */
 router.post('/', async (req: Request, res: Response) => {
+  const rawBody = (req as any).rawBody as Buffer | undefined
+  const signature = req.headers['x-hub-signature-256'] as string | undefined
+  if (!rawBody || !verifyMetaSignature(rawBody, signature)) {
+    logger.warn({ hasRawBody: !!rawBody, hasSignature: !!signature }, 'Legacy Meta webhook signature verification failed')
+    res.status(401).json({ error: 'Invalid signature', code: 'SIGNATURE_INVALID' })
+    return
+  }
+
   // Meta requires 200 response quickly, process async
   res.status(200).send('EVENT_RECEIVED')
 
