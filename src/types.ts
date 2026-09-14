@@ -273,6 +273,8 @@ export interface BotProcessRequest {
   deviceId: string
   orgIdOnDevice: string
   systemPrompt?: string
+  /** Org-configured Gemini model id from the gateway (`wa_bot_config.model`). */
+  model?: string
   maxHistoryMessages?: number
 }
 

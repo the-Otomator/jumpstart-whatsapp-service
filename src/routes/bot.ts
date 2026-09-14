@@ -48,6 +48,7 @@ router.post('/process', async (req: Request, res: Response) => {
       deviceId,
       orgIdOnDevice,
       systemPrompt: body.systemPrompt,
+      model: body.model,
       maxHistoryMessages: body.maxHistoryMessages,
     })
     res.json({

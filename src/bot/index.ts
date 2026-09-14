@@ -2,7 +2,7 @@ import type { BotProcessRequest } from '../types'
 import { logger } from '../lib/logger'
 import { createTenantClient, createBotRun, updateBotRunDone, updateBotRunError } from './runLogger'
 import { fetchHistory } from './contextBuilder'
-import { callGemini } from './gemini'
+import { callGemini, resolveGeminiModel } from './gemini'
 import { getTools, dispatchTool } from './toolRegistry'
 import { sendWhatsAppMessage } from '../routes/messages'
 
@@ -18,11 +18,12 @@ export async function processBotMessage(req: BotProcessRequest): Promise<BotProc
   const log = logger.child({ org: req.organizationId, conv: req.conversationId })
   const tenant = createTenantClient(req.tenantUrl, req.tenantServiceKey)
 
+  const model = resolveGeminiModel(req.model)
   const runId = await createBotRun(tenant, {
     organizationId: req.organizationId,
     conversationId: req.conversationId,
     triggerMessageId: req.messageId,
-    model: 'gemini-2.0-flash',
+    model,
   })
 
   try {
@@ -31,7 +32,7 @@ export async function processBotMessage(req: BotProcessRequest): Promise<BotProc
     log.info({ historyLen: history.length, runId }, 'Fetched conversation history')
 
     const tools = getTools()
-    const geminiResult = await callGemini(history, tools, req.systemPrompt)
+    const geminiResult = await callGemini(history, tools, req.systemPrompt, req.model)
     log.info(
       { hasText: !!geminiResult.text, fnCalls: geminiResult.functionCalls.length, runId },
       'Gemini responded',

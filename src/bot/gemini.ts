@@ -7,7 +7,34 @@ import {
 import type { ChatMessage, BotTool } from '../types'
 import { logger } from '../lib/logger'
 
-const MODEL = 'gemini-2.0-flash'
+export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
+
+/** Max length for a model id — keeps callers from stuffing arbitrary long strings. */
+const MAX_MODEL_LEN = 64
+
+/**
+ * Accept only Gemini model ids (`gemini-*`). Invalid values must not be passed
+ * through to the API (request body is untrusted).
+ */
+export function isValidGeminiModel(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const trimmed = value.trim()
+  if (trimmed.length === 0 || trimmed.length > MAX_MODEL_LEN) return false
+  return /^gemini-[a-zA-Z0-9._-]+$/.test(trimmed)
+}
+
+/**
+ * Precedence: request body → GEMINI_MODEL env → built-in default.
+ * Invalid request/env values fall back to the next tier (never passed through).
+ */
+export function resolveGeminiModel(
+  requestModel?: string | null,
+  envModel: string | undefined | null = process.env.GEMINI_MODEL,
+): string {
+  if (isValidGeminiModel(requestModel)) return requestModel.trim()
+  if (isValidGeminiModel(envModel)) return envModel.trim()
+  return DEFAULT_GEMINI_MODEL
+}
 
 const DEFAULT_SYSTEM_PROMPT =
   'You are a helpful WhatsApp assistant. Reply concisely in the same language the user writes in.'
@@ -17,15 +44,20 @@ export interface GeminiResponse {
   functionCalls: Array<{ name: string; args: Record<string, unknown> }>
   promptTokens: number
   completionTokens: number
+  model: string
 }
 
 export async function callGemini(
   messages: ChatMessage[],
   tools: BotTool[],
   systemPrompt?: string,
+  requestModel?: string | null,
 ): Promise<GeminiResponse> {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('GEMINI_API_KEY not set')
+
+  const modelName = resolveGeminiModel(requestModel)
+  logger.info({ model: modelName }, 'Gemini model selected')
 
   const genAI = new GoogleGenerativeAI(apiKey)
 
@@ -48,7 +80,7 @@ export async function callGemini(
       : []
 
   const model = genAI.getGenerativeModel({
-    model: MODEL,
+    model: modelName,
     systemInstruction: systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
     tools: geminiTools.length > 0 ? geminiTools : undefined,
   })
@@ -62,7 +94,7 @@ export async function callGemini(
   try {
     result = await model.generateContent({ contents })
   } catch (err) {
-    logger.error({ err }, 'Gemini API call failed')
+    logger.error({ err, model: modelName }, 'Gemini API call failed')
     throw err
   }
 
@@ -86,5 +118,6 @@ export async function callGemini(
     functionCalls,
     promptTokens: usage?.promptTokenCount ?? 0,
     completionTokens: usage?.candidatesTokenCount ?? 0,
+    model: modelName,
   }
 }
