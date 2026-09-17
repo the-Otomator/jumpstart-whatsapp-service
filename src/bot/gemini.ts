@@ -4,6 +4,7 @@ import {
   FunctionDeclarationsTool,
   GenerateContentResult,
 } from '@google/generative-ai'
+import { createClient } from '@supabase/supabase-js'
 import type { ChatMessage, BotTool } from '../types'
 import { logger } from '../lib/logger'
 
@@ -11,6 +12,33 @@ export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
 
 /** Max length for a model id — keeps callers from stuffing arbitrary long strings. */
 const MAX_MODEL_LEN = 64
+const MODEL_REGISTRY_MODULE = 'whatsapp_bot'
+export const MODEL_REGISTRY_CACHE_TTL_MS = 90_000
+
+type FallbackReason = 'not_in_catalog' | 'other'
+
+export interface ModelFallbackRecord {
+  organization_id: string
+  module_key: typeof MODEL_REGISTRY_MODULE
+  requested_model: string
+  used_model: string
+  reason: FallbackReason
+  provider_error: string | null
+}
+
+export interface ModelRegistry {
+  resolve(organizationId: string, moduleKey: string): Promise<string | null>
+  logFallback(record: ModelFallbackRecord): Promise<void>
+}
+
+export interface ModelResolution {
+  model: string
+  source: 'registry' | 'request' | 'env' | 'default'
+  fallbackReason: FallbackReason | null
+}
+
+const registryCache = new Map<string, { model: string | null; expiresAt: number }>()
+let platformRegistry: ModelRegistry | null = null
 
 /**
  * Accept only Gemini model ids (`gemini-*`). Invalid values must not be passed
@@ -23,17 +51,90 @@ export function isValidGeminiModel(value: unknown): value is string {
   return /^gemini-[a-zA-Z0-9._-]+$/.test(trimmed)
 }
 
-/**
- * Precedence: request body → GEMINI_MODEL env → built-in default.
- * Invalid request/env values fall back to the next tier (never passed through).
- */
-export function resolveGeminiModel(
+function getPlatformRegistry(): ModelRegistry {
+  if (platformRegistry) return platformRegistry
+  const url = process.env.BOT_SUPABASE_URL
+  const serviceKey = process.env.BOT_SUPABASE_SERVICE_KEY
+  if (!url || !serviceKey) throw new Error('Bot platform registry credentials are not set')
+  const client = createClient(url, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
+  platformRegistry = {
+    async resolve(organizationId, moduleKey) {
+      const { data, error } = await client.rpc('resolve_ai_model', {
+        p_org_id: organizationId,
+        p_module_key: moduleKey,
+      })
+      if (error) throw error
+      return typeof data === 'string' && data.trim() ? data.trim() : null
+    },
+    async logFallback(record) {
+      const { error } = await client.from('ai_model_fallback_log').insert(record)
+      if (error) throw error
+    },
+  }
+  return platformRegistry
+}
+
+async function recordFallback(registry: ModelRegistry, record: ModelFallbackRecord): Promise<void> {
+  try {
+    await registry.logFallback(record)
+  } catch (err) {
+    logger.error({ err, org: record.organization_id }, 'Failed to record AI model fallback')
+  }
+}
+
+/** Registry is authoritative. The request is a guarded compatibility fallback when
+ * no registry entry exists; the environment is emergency-only for registry outages. */
+export async function resolveGeminiModel(
+  organizationId: string,
   requestModel?: string | null,
   envModel: string | undefined | null = process.env.GEMINI_MODEL,
-): string {
-  if (isValidGeminiModel(requestModel)) return requestModel.trim()
-  if (isValidGeminiModel(envModel)) return envModel.trim()
-  return DEFAULT_GEMINI_MODEL
+  registry?: ModelRegistry,
+  now: number = Date.now(),
+): Promise<ModelResolution> {
+  let activeRegistry = registry
+  let registryModel: string | null
+  try {
+    activeRegistry ??= getPlatformRegistry()
+    const cached = registryCache.get(organizationId)
+    if (cached && cached.expiresAt > now) {
+      registryModel = cached.model
+    } else {
+      registryModel = await activeRegistry.resolve(organizationId, MODEL_REGISTRY_MODULE)
+      registryCache.set(organizationId, { model: registryModel, expiresAt: now + MODEL_REGISTRY_CACHE_TTL_MS })
+    }
+  } catch (err) {
+    const model = isValidGeminiModel(envModel) ? envModel.trim() : DEFAULT_GEMINI_MODEL
+    const fallbackRecord: ModelFallbackRecord = {
+      organization_id: organizationId,
+      module_key: MODEL_REGISTRY_MODULE,
+      requested_model: isValidGeminiModel(requestModel) ? requestModel.trim() : DEFAULT_GEMINI_MODEL,
+      used_model: model,
+      reason: 'other',
+      provider_error: err instanceof Error ? err.message : String(err),
+    }
+    if (activeRegistry) await recordFallback(activeRegistry, fallbackRecord)
+    else logger.error({ err, org: organizationId }, 'AI model registry unavailable before fallback could be recorded')
+    return { model, source: model === DEFAULT_GEMINI_MODEL ? 'default' : 'env', fallbackReason: 'other' }
+  }
+
+  if (registryModel !== null) return { model: registryModel, source: 'registry', fallbackReason: null }
+
+  const model = isValidGeminiModel(requestModel) ? requestModel.trim() : DEFAULT_GEMINI_MODEL
+  await recordFallback(activeRegistry!, {
+    organization_id: organizationId,
+    module_key: MODEL_REGISTRY_MODULE,
+    requested_model: model,
+    used_model: model,
+    reason: 'not_in_catalog',
+    provider_error: null,
+  })
+  return { model, source: model === DEFAULT_GEMINI_MODEL ? 'default' : 'request', fallbackReason: 'not_in_catalog' }
+}
+
+export function clearGeminiModelCacheForTests(): void {
+  registryCache.clear()
 }
 
 const DEFAULT_SYSTEM_PROMPT =
@@ -50,13 +151,12 @@ export interface GeminiResponse {
 export async function callGemini(
   messages: ChatMessage[],
   tools: BotTool[],
+  modelName: string,
   systemPrompt?: string,
-  requestModel?: string | null,
 ): Promise<GeminiResponse> {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('GEMINI_API_KEY not set')
 
-  const modelName = resolveGeminiModel(requestModel)
   logger.info({ model: modelName }, 'Gemini model selected')
 
   const genAI = new GoogleGenerativeAI(apiKey)

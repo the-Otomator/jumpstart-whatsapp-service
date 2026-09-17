@@ -18,7 +18,8 @@ export async function processBotMessage(req: BotProcessRequest): Promise<BotProc
   const log = logger.child({ org: req.organizationId, conv: req.conversationId })
   const tenant = createTenantClient(req.tenantUrl, req.tenantServiceKey)
 
-  const model = resolveGeminiModel(req.model)
+  const modelResolution = await resolveGeminiModel(req.organizationId, req.model)
+  const model = modelResolution.model
   const runId = await createBotRun(tenant, {
     organizationId: req.organizationId,
     conversationId: req.conversationId,
@@ -32,7 +33,7 @@ export async function processBotMessage(req: BotProcessRequest): Promise<BotProc
     log.info({ historyLen: history.length, runId }, 'Fetched conversation history')
 
     const tools = getTools()
-    const geminiResult = await callGemini(history, tools, req.systemPrompt, req.model)
+    const geminiResult = await callGemini(history, tools, model, req.systemPrompt)
     log.info(
       { hasText: !!geminiResult.text, fnCalls: geminiResult.functionCalls.length, runId },
       'Gemini responded',
