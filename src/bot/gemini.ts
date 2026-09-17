@@ -14,6 +14,8 @@ export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
 const MAX_MODEL_LEN = 64
 const MODEL_REGISTRY_MODULE = 'whatsapp_bot'
 export const MODEL_REGISTRY_CACHE_TTL_MS = 90_000
+export const MODEL_REGISTRY_OUTAGE_TTL_MS = 10_000
+export const MODEL_REGISTRY_TIMEOUT_MS = 500
 
 type FallbackReason = 'not_in_catalog' | 'other'
 
@@ -27,18 +29,37 @@ export interface ModelFallbackRecord {
 }
 
 export interface ModelRegistry {
-  resolve(organizationId: string, moduleKey: string): Promise<string | null>
-  logFallback(record: ModelFallbackRecord): Promise<void>
+  resolve(organizationId: string, moduleKey: string, signal: AbortSignal): Promise<string | null>
+  logFallback(record: ModelFallbackRecord, signal: AbortSignal): Promise<void>
 }
 
 export interface ModelResolution {
   model: string
   source: 'registry' | 'request' | 'env' | 'default'
   fallbackReason: FallbackReason | null
+  registryFailure: 'configuration' | 'network' | null
 }
 
-const registryCache = new Map<string, { model: string | null; expiresAt: number }>()
+type RegistryCacheEntry =
+  | { state: 'resolved'; model: string | null; expiresAt: number }
+  | { state: 'outage'; failure: 'configuration' | 'network'; expiresAt: number }
+
+const registryCache = new Map<string, RegistryCacheEntry>()
 let platformRegistry: ModelRegistry | null = null
+
+class RegistryConfigurationError extends Error {
+  constructor() {
+    super('Bot platform registry credentials are not set')
+    this.name = 'RegistryConfigurationError'
+  }
+}
+
+class RegistryTimeoutError extends Error {
+  constructor() {
+    super(`Bot platform registry timed out after ${MODEL_REGISTRY_TIMEOUT_MS}ms`)
+    this.name = 'RegistryTimeoutError'
+  }
+}
 
 /**
  * Accept only Gemini model ids (`gemini-*`). Invalid values must not be passed
@@ -55,32 +76,75 @@ function getPlatformRegistry(): ModelRegistry {
   if (platformRegistry) return platformRegistry
   const url = process.env.BOT_SUPABASE_URL
   const serviceKey = process.env.BOT_SUPABASE_SERVICE_KEY
-  if (!url || !serviceKey) throw new Error('Bot platform registry credentials are not set')
+  if (!url || !serviceKey) throw new RegistryConfigurationError()
   const client = createClient(url, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
   platformRegistry = {
-    async resolve(organizationId, moduleKey) {
-      const { data, error } = await client.rpc('resolve_ai_model', {
-        p_org_id: organizationId,
-        p_module_key: moduleKey,
-      })
+    async resolve(organizationId, moduleKey, signal) {
+      const { data, error } = await client
+        .rpc('resolve_ai_model', {
+          p_org_id: organizationId,
+          p_module_key: moduleKey,
+        })
+        .abortSignal(signal)
       if (error) throw error
       return typeof data === 'string' && data.trim() ? data.trim() : null
     },
-    async logFallback(record) {
-      const { error } = await client.from('ai_model_fallback_log').insert(record)
+    async logFallback(record, signal) {
+      const { error } = await client.from('ai_model_fallback_log').insert(record).abortSignal(signal)
       if (error) throw error
     },
   }
   return platformRegistry
 }
 
-async function recordFallback(registry: ModelRegistry, record: ModelFallbackRecord): Promise<void> {
-  try {
-    await registry.logFallback(record)
-  } catch (err) {
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  error: Error,
+  onTimeout?: () => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      onTimeout?.()
+      reject(error)
+    }, timeoutMs)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (reason) => {
+        clearTimeout(timer)
+        reject(reason)
+      },
+    )
+  })
+}
+
+function queueFallbackRecord(registry: ModelRegistry, record: ModelFallbackRecord): void {
+  const controller = new AbortController()
+  void withTimeout(
+    Promise.resolve().then(() => registry.logFallback(record, controller.signal)),
+    MODEL_REGISTRY_TIMEOUT_MS,
+    new RegistryTimeoutError(),
+    () => controller.abort(),
+  ).catch((err) => {
     logger.error({ err, org: record.organization_id }, 'Failed to record AI model fallback')
+  })
+}
+
+function emergencyResolution(
+  envModel: string | undefined | null,
+  failure: 'configuration' | 'network',
+): ModelResolution {
+  const model = isValidGeminiModel(envModel) ? envModel.trim() : DEFAULT_GEMINI_MODEL
+  return {
+    model,
+    source: model === DEFAULT_GEMINI_MODEL ? 'default' : 'env',
+    fallbackReason: 'other',
+    registryFailure: failure,
   }
 }
 
@@ -95,34 +159,53 @@ export async function resolveGeminiModel(
 ): Promise<ModelResolution> {
   let activeRegistry = registry
   let registryModel: string | null
-  try {
-    activeRegistry ??= getPlatformRegistry()
-    const cached = registryCache.get(organizationId)
-    if (cached && cached.expiresAt > now) {
-      registryModel = cached.model
-    } else {
-      registryModel = await activeRegistry.resolve(organizationId, MODEL_REGISTRY_MODULE)
-      registryCache.set(organizationId, { model: registryModel, expiresAt: now + MODEL_REGISTRY_CACHE_TTL_MS })
+  const cached = registryCache.get(organizationId)
+  if (cached && cached.expiresAt > now) {
+    if (cached.state === 'outage') return emergencyResolution(envModel, cached.failure)
+    registryModel = cached.model
+  } else {
+    try {
+      activeRegistry ??= getPlatformRegistry()
+      const controller = new AbortController()
+      registryModel = await withTimeout(
+        activeRegistry.resolve(organizationId, MODEL_REGISTRY_MODULE, controller.signal),
+        MODEL_REGISTRY_TIMEOUT_MS,
+        new RegistryTimeoutError(),
+        () => controller.abort(),
+      )
+      registryCache.set(organizationId, {
+        state: 'resolved',
+        model: registryModel,
+        expiresAt: now + MODEL_REGISTRY_CACHE_TTL_MS,
+      })
+    } catch (err) {
+      const failure = err instanceof RegistryConfigurationError ? 'configuration' : 'network'
+      const resolution = emergencyResolution(envModel, failure)
+      registryCache.set(organizationId, {
+        state: 'outage',
+        failure,
+        expiresAt: now + MODEL_REGISTRY_OUTAGE_TTL_MS,
+      })
+      const fallbackRecord: ModelFallbackRecord = {
+        organization_id: organizationId,
+        module_key: MODEL_REGISTRY_MODULE,
+        requested_model: isValidGeminiModel(requestModel) ? requestModel.trim() : DEFAULT_GEMINI_MODEL,
+        used_model: resolution.model,
+        reason: 'other',
+        provider_error: `[${failure}] ${err instanceof Error ? err.message : String(err)}`,
+      }
+      if (activeRegistry) queueFallbackRecord(activeRegistry, fallbackRecord)
+      logger.error({ err, org: organizationId, registryFailure: failure }, 'AI model registry unavailable')
+      return resolution
     }
-  } catch (err) {
-    const model = isValidGeminiModel(envModel) ? envModel.trim() : DEFAULT_GEMINI_MODEL
-    const fallbackRecord: ModelFallbackRecord = {
-      organization_id: organizationId,
-      module_key: MODEL_REGISTRY_MODULE,
-      requested_model: isValidGeminiModel(requestModel) ? requestModel.trim() : DEFAULT_GEMINI_MODEL,
-      used_model: model,
-      reason: 'other',
-      provider_error: err instanceof Error ? err.message : String(err),
-    }
-    if (activeRegistry) await recordFallback(activeRegistry, fallbackRecord)
-    else logger.error({ err, org: organizationId }, 'AI model registry unavailable before fallback could be recorded')
-    return { model, source: model === DEFAULT_GEMINI_MODEL ? 'default' : 'env', fallbackReason: 'other' }
   }
 
-  if (registryModel !== null) return { model: registryModel, source: 'registry', fallbackReason: null }
+  if (registryModel !== null) {
+    return { model: registryModel, source: 'registry', fallbackReason: null, registryFailure: null }
+  }
 
   const model = isValidGeminiModel(requestModel) ? requestModel.trim() : DEFAULT_GEMINI_MODEL
-  await recordFallback(activeRegistry!, {
+  queueFallbackRecord(activeRegistry!, {
     organization_id: organizationId,
     module_key: MODEL_REGISTRY_MODULE,
     requested_model: model,
@@ -130,7 +213,12 @@ export async function resolveGeminiModel(
     reason: 'not_in_catalog',
     provider_error: null,
   })
-  return { model, source: model === DEFAULT_GEMINI_MODEL ? 'default' : 'request', fallbackReason: 'not_in_catalog' }
+  return {
+    model,
+    source: model === DEFAULT_GEMINI_MODEL ? 'default' : 'request',
+    fallbackReason: 'not_in_catalog',
+    registryFailure: null,
+  }
 }
 
 export function clearGeminiModelCacheForTests(): void {

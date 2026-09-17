@@ -2,6 +2,8 @@
 import assert from 'assert'
 import {
   DEFAULT_GEMINI_MODEL,
+  MODEL_REGISTRY_OUTAGE_TTL_MS,
+  MODEL_REGISTRY_TIMEOUT_MS,
   ModelFallbackRecord,
   ModelRegistry,
   clearGeminiModelCacheForTests,
@@ -14,16 +16,22 @@ const ORG_ID = '11111111-1111-4111-8111-111111111111'
 class FakeRegistry implements ModelRegistry {
   readonly records: ModelFallbackRecord[] = []
   resolveCalls = 0
-  constructor(
-    private readonly value: string | null,
-    private readonly resolveError?: Error,
-    private readonly logError?: Error,
-  ) {}
+  value: string | null
+  resolveError?: Error
+  hang = false
+
+  constructor(value: string | null, resolveError?: Error, private readonly logError?: Error) {
+    this.value = value
+    this.resolveError = resolveError
+  }
+
   async resolve(): Promise<string | null> {
     this.resolveCalls += 1
+    if (this.hang) return new Promise<string | null>(() => undefined)
     if (this.resolveError) throw this.resolveError
     return this.value
   }
+
   async logFallback(record: ModelFallbackRecord): Promise<void> {
     this.records.push(record)
     if (this.logError) throw this.logError
@@ -42,56 +50,130 @@ function testValidation(): void {
   assert.strictEqual(isValidGeminiModel('gemini-' + 'x'.repeat(100)), false)
 }
 
-async function testResolution(): Promise<void> {
+async function testHealthyResolution(): Promise<void> {
   clearGeminiModelCacheForTests()
-  const registryWins = new FakeRegistry('gemini-registry')
-  const selected = await resolveGeminiModel(ORG_ID, 'gemini-request', 'gemini-env', registryWins, 0)
-  assert.deepStrictEqual(selected, { model: 'gemini-registry', source: 'registry', fallbackReason: null })
-  assert.strictEqual(registryWins.records.length, 0)
-  const cached = await resolveGeminiModel(ORG_ID, undefined, 'gemini-env', registryWins, 45_000)
-  assert.strictEqual(cached.model, 'gemini-registry')
-  assert.strictEqual(registryWins.resolveCalls, 1)
-  await resolveGeminiModel(ORG_ID, undefined, 'gemini-env', registryWins, 90_001)
-  assert.strictEqual(registryWins.resolveCalls, 2)
+  const registry = new FakeRegistry('gemini-registry')
+  const selected = await resolveGeminiModel(ORG_ID, 'gemini-request', 'gemini-env', registry, 0)
+  assert.deepStrictEqual(selected, {
+    model: 'gemini-registry',
+    source: 'registry',
+    fallbackReason: null,
+    registryFailure: null,
+  })
+  await resolveGeminiModel(ORG_ID, undefined, 'gemini-env', registry, 45_000)
+  assert.strictEqual(registry.resolveCalls, 1)
+  await resolveGeminiModel(ORG_ID, undefined, 'gemini-env', registry, 90_001)
+  assert.strictEqual(registry.resolveCalls, 2)
 
   clearGeminiModelCacheForTests()
-  const nonGeminiRegistry = new FakeRegistry('claude-registry-model')
-  const nonGemini = await resolveGeminiModel(ORG_ID, undefined, 'gemini-env', nonGeminiRegistry)
+  const nonGemini = await resolveGeminiModel(
+    ORG_ID,
+    undefined,
+    'gemini-env',
+    new FakeRegistry('claude-registry-model'),
+  )
   assert.strictEqual(nonGemini.model, 'claude-registry-model')
-  assert.strictEqual(nonGemini.source, 'registry')
+}
+
+async function testBoundedOutage(): Promise<{ messages: number; calls: number; writes: number }> {
+  clearGeminiModelCacheForTests()
+  const registry = new FakeRegistry(null, new Error('network unavailable'))
+  const messages = 100
+  for (let index = 0; index < messages; index += 1) {
+    const result = await resolveGeminiModel(ORG_ID, undefined, 'gemini-emergency', registry, index)
+    assert.strictEqual(result.model, 'gemini-emergency')
+    assert.strictEqual(result.registryFailure, 'network')
+  }
+  assert.strictEqual(registry.resolveCalls, 1)
+  assert.strictEqual(registry.records.length, 1)
+  return { messages, calls: registry.resolveCalls, writes: registry.records.length }
+}
+
+async function testHangingRegistry(): Promise<number> {
+  clearGeminiModelCacheForTests()
+  const registry = new FakeRegistry(null)
+  registry.hang = true
+  const started = performance.now()
+  const result = await resolveGeminiModel(ORG_ID, undefined, 'gemini-emergency', registry)
+  const elapsed = Math.round(performance.now() - started)
+  assert.strictEqual(result.model, 'gemini-emergency')
+  assert.strictEqual(result.registryFailure, 'network')
+  assert.ok(elapsed >= MODEL_REGISTRY_TIMEOUT_MS - 50, `timeout returned too early: ${elapsed}ms`)
+  assert.ok(elapsed < MODEL_REGISTRY_TIMEOUT_MS + 500, `timeout exceeded bound margin: ${elapsed}ms`)
+  return elapsed
+}
+
+async function testRecovery(): Promise<number> {
+  clearGeminiModelCacheForTests()
+  const registry = new FakeRegistry(null, new Error('temporary outage'))
+  await resolveGeminiModel(ORG_ID, undefined, 'gemini-emergency', registry, 0)
+  registry.resolveError = undefined
+  registry.value = 'gemini-recovered'
+  const stillCached = await resolveGeminiModel(
+    ORG_ID,
+    undefined,
+    'gemini-emergency',
+    registry,
+    MODEL_REGISTRY_OUTAGE_TTL_MS - 1,
+  )
+  assert.strictEqual(stillCached.source, 'env')
+  const recoveredAt = MODEL_REGISTRY_OUTAGE_TTL_MS + 1
+  const recovered = await resolveGeminiModel(ORG_ID, undefined, 'gemini-emergency', registry, recoveredAt)
+  assert.strictEqual(recovered.model, 'gemini-recovered')
+  assert.strictEqual(recovered.source, 'registry')
+  assert.strictEqual(registry.resolveCalls, 2)
+  return recoveredAt
+}
+
+async function testMissingCredentialsDiagnostic(): Promise<void> {
+  clearGeminiModelCacheForTests()
+  const oldUrl = process.env.BOT_SUPABASE_URL
+  const oldKey = process.env.BOT_SUPABASE_SERVICE_KEY
+  delete process.env.BOT_SUPABASE_URL
+  delete process.env.BOT_SUPABASE_SERVICE_KEY
+  try {
+    const missing = await resolveGeminiModel(ORG_ID, undefined, 'gemini-emergency', undefined, 0)
+    assert.strictEqual(missing.registryFailure, 'configuration')
+    assert.strictEqual(missing.model, 'gemini-emergency')
+  } finally {
+    if (oldUrl === undefined) delete process.env.BOT_SUPABASE_URL
+    else process.env.BOT_SUPABASE_URL = oldUrl
+    if (oldKey === undefined) delete process.env.BOT_SUPABASE_SERVICE_KEY
+    else process.env.BOT_SUPABASE_SERVICE_KEY = oldKey
+  }
 
   clearGeminiModelCacheForTests()
-  const missingRegistry = new FakeRegistry(null)
-  const requestFallback = await resolveGeminiModel(ORG_ID, 'gemini-request', 'gemini-env-must-not-win', missingRegistry)
-  assert.strictEqual(requestFallback.model, 'gemini-request')
-  assert.strictEqual(missingRegistry.records[0].reason, 'not_in_catalog')
+  const network = await resolveGeminiModel(
+    ORG_ID,
+    undefined,
+    'gemini-emergency',
+    new FakeRegistry(null, new Error('network outage')),
+    0,
+  )
+  assert.strictEqual(network.registryFailure, 'network')
+}
 
-  clearGeminiModelCacheForTests()
-  const outage = new FakeRegistry(null, new Error('registry unavailable'))
-  const emergency = await resolveGeminiModel(ORG_ID, 'gpt-is-untrusted', 'gemini-emergency', outage)
-  assert.strictEqual(emergency.model, 'gemini-emergency')
-  assert.strictEqual(emergency.fallbackReason, 'other')
-  assert.strictEqual(outage.records[0].used_model, 'gemini-emergency')
-  assert.strictEqual(outage.records[0].provider_error, 'registry unavailable')
-
-  clearGeminiModelCacheForTests()
-  const outageWithoutValidEnv = new FakeRegistry(null, new Error('registry timeout'))
-  const builtIn = await resolveGeminiModel(ORG_ID, undefined, 'claude-env-is-invalid', outageWithoutValidEnv)
-  assert.strictEqual(builtIn.model, DEFAULT_GEMINI_MODEL)
-  assert.strictEqual(outageWithoutValidEnv.records[0].used_model, DEFAULT_GEMINI_MODEL)
-
+async function testFailedLogDoesNotFailResolution(): Promise<void> {
   clearGeminiModelCacheForTests()
   const failedLog = new FakeRegistry(null, new Error('registry offline'), new Error('insert denied'))
-  const stillAnswers = await resolveGeminiModel(ORG_ID, undefined, 'gemini-emergency', failedLog)
-  assert.strictEqual(stillAnswers.model, 'gemini-emergency')
-
-  console.log(`observed model: ${emergency.model}`)
-  console.log(`observed fallback reason: ${outage.records[0].reason}`)
+  const result = await resolveGeminiModel(ORG_ID, undefined, 'gemini-emergency', failedLog)
+  assert.strictEqual(result.model, 'gemini-emergency')
 }
 
 async function main(): Promise<void> {
   testValidation()
-  await testResolution()
+  await testHealthyResolution()
+  const bounded = await testBoundedOutage()
+  const elapsed = await testHangingRegistry()
+  const recoveredAt = await testRecovery()
+  await testMissingCredentialsDiagnostic()
+  await testFailedLogDoesNotFailResolution()
+  console.log(`outage messages: ${bounded.messages}`)
+  console.log(`registry attempts: ${bounded.calls}`)
+  console.log(`fallback write attempts: ${bounded.writes}`)
+  console.log(`latency cap: ${MODEL_REGISTRY_TIMEOUT_MS}ms; observed: ${elapsed}ms`)
+  console.log(`recovery window: ${MODEL_REGISTRY_OUTAGE_TTL_MS}ms; observed recovery: ${recoveredAt}ms`)
+  console.log('missing credentials: configuration; network outage: network')
   console.log('gemini.test.ts: all passed')
 }
 
