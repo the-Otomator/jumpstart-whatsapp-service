@@ -29,6 +29,11 @@ import {
   stopWaDeviceMonitor,
   getHeartbeatFailures,
 } from './lib/waDeviceMonitor'
+import {
+  getOrgValidationFailures,
+  getLastOrgValidationError,
+  getLastOrgValidationErrorAt,
+} from './lib/validationAlert'
 import { getAllCryptoStats, getCryptoStatsTotals } from './lib/baileysTelemetry'
 import {
   startMediaPruneScheduler,
@@ -258,6 +263,9 @@ async function detailedHealth(_req: express.Request, res: express.Response): Pro
     disk,
     recentErrors,
     heartbeatFailures: getHeartbeatFailures(),
+    orgValidationFailures: getOrgValidationFailures(),
+    lastOrgValidationError: getLastOrgValidationError(),
+    lastOrgValidationErrorAt: getLastOrgValidationErrorAt(),
     baileysCrypto: {
       totals: getCryptoStatsTotals(),
       perSession: getAllCryptoStats(),

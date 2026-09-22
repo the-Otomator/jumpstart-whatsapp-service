@@ -1,4 +1,4 @@
-﻿import { Router, Request, Response } from 'express'
+import { Router, Request, Response } from 'express'
 import { createHmac, timingSafeEqual } from 'crypto'
 import type { NextFunction } from 'express'
 import { rateLimit } from 'express-rate-limit'
@@ -123,11 +123,15 @@ router.get('/:orgId', async (req: Request, res: Response) => {
 
   const orgCheck = await validateOrg(orgId)
   if (orgCheck.unavailable) {
-    res.status(503).send(renderErrorPage(orgId, 'Organization validation is temporarily unavailable'))
+    res.status(503).send(renderErrorPage(
+      orgId,
+      'Temporary system error — the team has been notified. Try again in a few minutes.',
+      { variant: 'unavailable' }
+    ))
     return
   }
   if (!orgCheck.valid) {
-    res.status(403).send(renderErrorPage(orgId, 'No active subscription for this org'))
+    res.status(403).send(renderErrorPage(orgId, 'No active subscription for this org', { variant: 'forbidden' }))
     return
   }
 
@@ -147,7 +151,8 @@ router.get('/:orgId', async (req: Request, res: Response) => {
       )
       res.status(503).send(renderErrorPage(
         orgId,
-        'לא ניתן להתחיל חיבור מכאן — יש להפעיל את המכשיר מתוך JumpStart (הגדרות ← WhatsApp ← מכשירים).'
+        'לא ניתן להתחיל חיבור מכאן — יש להפעיל את המכשיר מתוך JumpStart (הגדרות ← WhatsApp ← מכשירים).',
+        { variant: 'unavailable' }
       ))
       return
     }
@@ -392,7 +397,17 @@ ${CONNECT_PAGE_MARKER}
 </html>`
 }
 
-function renderErrorPage(orgId: string, message: string): string {
+/** Exported for unit tests — 503 (unavailable) must not show a subscribe CTA. */
+export function renderErrorPage(
+  orgId: string,
+  message: string,
+  options: { variant: 'unavailable' | 'forbidden' } = { variant: 'forbidden' }
+): string {
+  const showSubscribe = options.variant === 'forbidden'
+  const detail = showSubscribe
+    ? '<p>To use WhatsApp service, please subscribe first.</p>\n    <a class="cta" href="https://hub.jumpstart.co.il">Subscribe</a>'
+    : '<p>If this keeps happening, contact support — device connection is temporarily blocked.</p>'
+
   return `<!DOCTYPE html>
 ${CONNECT_PAGE_MARKER}
 <html lang="he" dir="rtl">
@@ -423,11 +438,10 @@ ${CONNECT_PAGE_MARKER}
   </style>
 </head>
 <body>
-  <div class="card">
+  <div class="card" data-org="${escapeHtml(orgId)}" data-variant="${options.variant}">
     <div class="icon">&#128683;</div>
-    <h1>${message}</h1>
-    <p>To use WhatsApp service, please subscribe first.</p>
-    <a class="cta" href="https://hub.jumpstart.co.il">Subscribe</a>
+    <h1>${escapeHtml(message)}</h1>
+    ${detail}
   </div>
 </body>
 </html>`

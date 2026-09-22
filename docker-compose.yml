@@ -13,6 +13,7 @@ services:
         max-file: "10"
     ports:
       - "127.0.0.1:${PORT:-3001}:3001"
+    # JUMPSTART_SUPABASE_URL / JUMPSTART_SUPABASE_SERVICE_KEY come from .env (see .env.example)
     env_file:
       - .env
     volumes:

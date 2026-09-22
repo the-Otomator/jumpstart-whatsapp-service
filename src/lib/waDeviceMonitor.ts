@@ -13,9 +13,35 @@ const ALERT_FROM =
   'c3aa7a0d-461a-4ed4-882a-58bd063b1e62-d1fde265'
 
 /** Default on. Set WA_SESSION_ALERTS=0|false|off to disable. */
-function alertsEnabled(): boolean {
+export function alertsEnabled(): boolean {
   const v = (process.env.WA_SESSION_ALERTS ?? '1').trim().toLowerCase()
   return !(v === '0' || v === 'false' || v === 'off' || v === 'no')
+}
+
+/**
+ * Pick a healthy connected session to send operational alerts from.
+ * Prefer WA_ALERT_FROM_SESSION_KEY when it is up; otherwise any other connected session.
+ * Pass excludeSessionKey to avoid using a known-down session as the sender.
+ */
+export async function resolveAlertSender(excludeSessionKey?: string): Promise<string | null> {
+  if (!excludeSessionKey || ALERT_FROM !== excludeSessionKey) {
+    const fromStatus = listActiveSessions().find((s) => s.orgId === ALERT_FROM)
+    if (fromStatus?.status === 'connected' && isSocketOpen(getBaileysSocket(ALERT_FROM))) {
+      return ALERT_FROM
+    }
+  }
+
+  const fallback = listActiveSessions().find(
+    (s) =>
+      s.orgId !== excludeSessionKey &&
+      s.status === 'connected' &&
+      isSocketOpen(getBaileysSocket(s.orgId))
+  )
+  return fallback?.orgId ?? null
+}
+
+export function getAlertToPhone(): string {
+  return ALERT_TO
 }
 
 let heartbeatFailures = 0
@@ -135,23 +161,6 @@ async function processOutageAlerts(liveKeys: string[]): Promise<void> {
   }
 }
 
-async function resolveAlertSender(downSessionKey: string): Promise<string | null> {
-  if (ALERT_FROM !== downSessionKey) {
-    const fromStatus = listActiveSessions().find((s) => s.orgId === ALERT_FROM)
-    if (fromStatus?.status === 'connected' && isSocketOpen(getBaileysSocket(ALERT_FROM))) {
-      return ALERT_FROM
-    }
-  }
-
-  const fallback = listActiveSessions().find(
-    (s) =>
-      s.orgId !== downSessionKey &&
-      s.status === 'connected' &&
-      isSocketOpen(getBaileysSocket(s.orgId))
-  )
-  return fallback?.orgId ?? null
-}
-
 async function sendOutageAlert(row: WaDeviceRow, durationMs: number): Promise<void> {
   const mins = Math.round(durationMs / 60_000)
   const text =
@@ -176,7 +185,7 @@ async function sendOutageAlert(row: WaDeviceRow, durationMs: number): Promise<vo
     const { sendWhatsAppMessage } = await import('../routes/messages')
     await sendWhatsAppMessage({
       orgId: sender,
-      to: ALERT_TO,
+      to: getAlertToPhone(),
       type: 'text',
       message: text,
     })
@@ -208,7 +217,7 @@ async function sendRecoveryAndClear(row: WaDeviceRow): Promise<void> {
       const { sendWhatsAppMessage } = await import('../routes/messages')
       await sendWhatsAppMessage({
         orgId: sender,
-        to: ALERT_TO,
+        to: getAlertToPhone(),
         type: 'text',
         message: text,
       })

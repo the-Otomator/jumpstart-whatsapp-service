@@ -1,5 +1,7 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { jumpstartSupabase } from './jumpstartSupabase'
 import { logger } from './logger'
+import { recordOrgValidationFailure } from './validationAlert'
 
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY
@@ -20,11 +22,28 @@ export interface WhatsappDeviceLookup {
   webhookSecret: string | null
 }
 
-/** One registry read shared by entitlement validation and webhook resolution. */
-export async function lookupWhatsappDevice(sessionKey: string): Promise<WhatsappDeviceLookup> {
-  if (!supabase) throw new Error('SUPABASE_NOT_CONFIGURED')
+export type OrgValidationResult = {
+  valid: boolean
+  plan?: string
+  userEmail?: string
+  organizationName?: string
+  deviceWebhookUrl: string | null
+  deviceWebhookSecret: string | null
+  unavailable?: boolean
+}
 
-  const { data, error } = await supabase
+/** Minimal client surface used by validateOrg (testable without a live client). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type OrgValidationClient = { from: (table: string) => any }
+
+/** One registry read shared by entitlement validation and webhook resolution. */
+export async function lookupWhatsappDevice(
+  sessionKey: string,
+  hub: SupabaseClient | null = supabase
+): Promise<WhatsappDeviceLookup> {
+  if (!hub) throw new Error('SUPABASE_NOT_CONFIGURED')
+
+  const { data, error } = await hub
     .from('whatsapp_devices')
     .select('org_id, webhook_url, webhook_secret')
     .eq('session_key', sessionKey)
@@ -49,32 +68,37 @@ export async function getDeviceWebhookUrl(sessionKey: string): Promise<string | 
 /**
  * Check if an orgId has an active subscription for the whatsapp-service product.
  * Returns the subscription if valid, null if not found or inactive.
- * If Supabase is not configured, returns a mock "valid" result (dev mode).
+ * Hub client: central_subscriptions / products / partner_org_slots / whatsapp_devices.
+ * JumpStart client: org_system_subscriptions / system_license_plans.
  */
-export async function validateOrg(orgId: string): Promise<{
-  valid: boolean
-  plan?: string
-  userEmail?: string
-  organizationName?: string
-  deviceWebhookUrl: string | null
-  deviceWebhookSecret: string | null
-  unavailable?: boolean
-}> {
+export async function validateOrg(
+  orgId: string,
+  deps?: {
+    hub?: OrgValidationClient | null
+    jumpstart?: OrgValidationClient | null
+  }
+): Promise<OrgValidationResult> {
+  const hub = (deps?.hub !== undefined ? deps.hub : supabase) as OrgValidationClient | null
+  const jumpstart = (
+    deps?.jumpstart !== undefined ? deps.jumpstart : jumpstartSupabase
+  ) as OrgValidationClient | null
+
   // Entitlement checks are authorization boundaries and must fail closed.
-  if (!supabase) {
+  if (!hub) {
     logger.error({ orgId }, 'Supabase not configured — rejecting org validation')
+    await recordOrgValidationFailure(orgId, 'SUPABASE_NOT_CONFIGURED')
     return { valid: false, unavailable: true, deviceWebhookUrl: null, deviceWebhookSecret: null }
   }
 
   try {
     // Resolve session_key -> org_id for multi-device sessions (e.g. "uuid-8char" suffix)
-    const device = await lookupWhatsappDevice(orgId)
+    const device = await lookupWhatsappDevice(orgId, hub as unknown as SupabaseClient)
     if (device.orgId) {
       logger.debug({ sessionKey: orgId, orgId: device.orgId }, 'Resolved session_key to org_id')
       orgId = device.orgId
     }
 
-    const { data: central, error: centralErr } = await supabase
+    const { data: central, error: centralErr } = await hub
       .from('central_subscriptions')
       .select('org_id, plan, status, user_email, organization_name, product_id')
       .eq('org_id', orgId)
@@ -83,69 +107,86 @@ export async function validateOrg(orgId: string): Promise<{
 
     if (centralErr) throw new Error(`CENTRAL_SUBSCRIPTION_LOOKUP_FAILED: ${centralErr.message}`)
 
-    if (central) {
-      const { data: product, error: productErr } = await supabase
+    const centralRow = central as {
+      plan?: string
+      user_email?: string
+      organization_name?: string
+      product_id?: string
+    } | null
+
+    if (centralRow) {
+      const { data: product, error: productErr } = await hub
         .from('products')
         .select('slug')
-        .eq('id', central.product_id)
+        .eq('id', String(centralRow.product_id ?? ''))
         .maybeSingle()
 
       if (productErr) throw new Error(`PRODUCT_LOOKUP_FAILED: ${productErr.message}`)
 
-      if (product?.slug === 'whatsapp-service') {
+      const productRow = product as { slug?: string } | null
+      if (productRow?.slug === 'whatsapp-service') {
         return {
           valid: true,
-          plan: central.plan,
-          userEmail: central.user_email,
-          organizationName: central.organization_name,
+          plan: centralRow.plan,
+          userEmail: centralRow.user_email,
+          organizationName: centralRow.organization_name,
           deviceWebhookUrl: device.webhookUrl,
           deviceWebhookSecret: device.webhookSecret,
         }
       }
     }
 
-    // Jumpstart system license: WhatsApp device slots on the plan + purchased extras in metadata
-    const { data: oss, error: ossErr } = await supabase
-      .from('org_system_subscriptions')
-      .select('plan_code, metadata')
-      .eq('organization_id', orgId)
-      .eq('system_code', 'jumpstart')
-      .eq('status', 'active')
-      .maybeSingle()
-
-    if (ossErr) throw new Error(`SYSTEM_SUBSCRIPTION_LOOKUP_FAILED: ${ossErr.message}`)
-
-    if (oss) {
-      const { data: planRow, error: planErr } = await supabase
-        .from('system_license_plans')
-        .select('features')
+    // Jumpstart system license lives on dgxn — never query these tables on Hub (mzalz).
+    if (!jumpstart) {
+      logger.error(
+        { orgId },
+        'JumpStart Supabase not configured — skipping system license entitlement check'
+      )
+    } else {
+      const { data: oss, error: ossErr } = await jumpstart
+        .from('org_system_subscriptions')
+        .select('plan_code, metadata')
+        .eq('organization_id', orgId)
         .eq('system_code', 'jumpstart')
-        .eq('code', oss.plan_code)
+        .eq('status', 'active')
         .maybeSingle()
 
-      if (planErr) throw new Error(`LICENSE_PLAN_LOOKUP_FAILED: ${planErr.message}`)
+      if (ossErr) throw new Error(`SYSTEM_SUBSCRIPTION_LOOKUP_FAILED: ${ossErr.message}`)
 
-      const features = (planRow?.features ?? {}) as Record<string, unknown>
-      const metadata = (oss.metadata ?? {}) as Record<string, unknown>
-      const included = Math.max(0, Math.floor(Number(features.whatsapp_devices_included ?? 0)))
-      const extraPurchased = Math.max(0, Math.floor(Number(metadata.whatsapp_extra_devices ?? 0)))
-      const deviceCap = included + extraPurchased
+      const ossRow = oss as { plan_code?: string; metadata?: unknown } | null
+      if (ossRow) {
+        const { data: planRow, error: planErr } = await jumpstart
+          .from('system_license_plans')
+          .select('features')
+          .eq('system_code', 'jumpstart')
+          .eq('code', String(ossRow.plan_code ?? ''))
+          .maybeSingle()
 
-      if (deviceCap >= 1) {
-        logger.info({ orgId, included, extraPurchased, deviceCap }, 'WhatsApp allowed via Jumpstart license')
-        return {
-          valid: true,
-          plan: `jumpstart/${String(oss.plan_code)}`,
-          deviceWebhookUrl: device.webhookUrl,
-          deviceWebhookSecret: device.webhookSecret,
+        if (planErr) throw new Error(`LICENSE_PLAN_LOOKUP_FAILED: ${planErr.message}`)
+
+        const planData = planRow as { features?: unknown } | null
+        const features = (planData?.features ?? {}) as Record<string, unknown>
+        const metadata = (ossRow.metadata ?? {}) as Record<string, unknown>
+        const included = Math.max(0, Math.floor(Number(features.whatsapp_devices_included ?? 0)))
+        const extraPurchased = Math.max(0, Math.floor(Number(metadata.whatsapp_extra_devices ?? 0)))
+        const deviceCap = included + extraPurchased
+
+        if (deviceCap >= 1) {
+          logger.info({ orgId, included, extraPurchased, deviceCap }, 'WhatsApp allowed via Jumpstart license')
+          return {
+            valid: true,
+            plan: `jumpstart/${String(ossRow.plan_code)}`,
+            deviceWebhookUrl: device.webhookUrl,
+            deviceWebhookSecret: device.webhookSecret,
+          }
         }
-      }
 
-      logger.info({ orgId, included, extraPurchased }, 'Jumpstart license has no WhatsApp device slots')
+        logger.info({ orgId, included, extraPurchased }, 'Jumpstart license has no WhatsApp device slots')
+      }
     }
 
     // Check 4: Partner org slot (WorkMatch and future partners)
-    const { data: slot, error: slotErr } = await supabase
+    const { data: slot, error: slotErr } = await hub
       .from('partner_org_slots')
       .select('org_id, partner_name, status')
       .eq('org_id', orgId)
@@ -154,11 +195,12 @@ export async function validateOrg(orgId: string): Promise<{
 
     if (slotErr) throw new Error(`PARTNER_SLOT_LOOKUP_FAILED: ${slotErr.message}`)
 
-    if (slot) {
-      logger.info({ orgId, partner: slot.partner_name }, 'WhatsApp allowed via partner license')
+    const slotRow = slot as { partner_name?: string } | null
+    if (slotRow) {
+      logger.info({ orgId, partner: slotRow.partner_name }, 'WhatsApp allowed via partner license')
       return {
         valid: true,
-        plan: `partner/${slot.partner_name}`,
+        plan: `partner/${slotRow.partner_name}`,
         deviceWebhookUrl: device.webhookUrl,
         deviceWebhookSecret: device.webhookSecret,
       }
@@ -172,6 +214,7 @@ export async function validateOrg(orgId: string): Promise<{
     }
   } catch (err) {
     logger.error({ orgId, err }, 'Error validating org against Supabase')
+    await recordOrgValidationFailure(orgId, err)
     return { valid: false, unavailable: true, deviceWebhookUrl: null, deviceWebhookSecret: null }
   }
 }
