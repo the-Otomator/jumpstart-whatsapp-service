@@ -9,8 +9,10 @@
 ## 1. SSH into VPS
 
 ```bash
-ssh root@YOUR_VPS_IP
+ssh deploy@YOUR_VPS_IP
 ```
+
+Production SSH is key-only. The `deploy` account has sudo access; do not use root for routine deployments.
 
 ---
 
@@ -117,6 +119,24 @@ Certbot auto-renews. Test renewal:
 ```bash
 sudo certbot renew --dry-run
 ```
+
+The production host uses nginx with a Cloudflare Origin Certificate and Cloudflare SSL/TLS mode **Full (strict)** instead of Certbot. Port 3001 stays bound to `127.0.0.1`; only nginx accepts public web traffic.
+
+## Production security and backups
+
+Production has two ingress filters: Hetzner Cloud Firewall `wa-fw` and UFW. Both allow port 22 only from the administrative allowlist and ports 80/443 only from Cloudflare's published IPv4/IPv6 ranges. All other inbound traffic is denied; outbound traffic is unrestricted. Refresh host Cloudflare ranges with `sudo /usr/local/sbin/wa-refresh-ufw` after reviewing the current allowlist.
+
+The `wa-backup.timer` unit runs nightly. It archives the `sessions-data` Docker volume, `/opt/whatsapp-service/.env`, the nginx reverse-proxy configuration, and `docker-compose.yml`; encrypts the archive to the configured age recipient; uploads it to private R2 bucket `wa-backups`; and retains 14 days. It never stops the app and reads the sessions volume without modifying it.
+
+Check backup health without exposing archive contents:
+
+```bash
+sudo systemctl status wa-backup.timer --no-pager
+sudo cat /var/lib/wa-backup/last_status
+sudo cat /var/lib/wa-backup/last_success
+```
+
+Operational scripts are in `scripts/ops/`. Secrets belong only in root-owned `/etc/wa-backup.env` on the server and must never be committed or logged.
 
 ---
 
