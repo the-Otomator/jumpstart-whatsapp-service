@@ -3,7 +3,7 @@ PARTIAL — Pending night window: Phase B
 # Release-window rule — jumpstart-whatsapp-service
 
 - Routing: local isolated worktree, branch `chore/release-window-gate` from `origin/master`.
-- PR: pending.
+- PR: https://github.com/the-Otomator/jumpstart-whatsapp-service/pull/66
 - Files: `CLAUDE.md`, `AGENTS.md`, `.cursor/rules/cowork-exec-contract.mdc`, `.github/workflows/nightly-merge.yml`.
 - Nightly workflow: `PROD_BRANCH=master`, `DEPLOY_WORKFLOW=''`, `GATE_WORKFLOW=''`.
 - Preflight: authenticated GitHub admin; repository public; default branch `master`. This manual-deploy repository intentionally gets no `release-window` workflow or branch-protection change.
