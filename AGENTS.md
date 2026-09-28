@@ -28,6 +28,11 @@ Cowork writes that line only after Nizan approved it explicitly in chat. "Author
 If the PR needs steps after the merge (Edge Function deploy, migration-queue submit, live verification, anything beyond the merge itself), put the line `Release: manual` in the PR body; such PRs are never auto-merged and the task file's night phase is run in Cursor instead.
 **Never:** approve, unapprove or pause anything in Night releases, write to the `release_*` tables, or edit `nightly-merge.yml` / `release-window.yml` to weaken them.
 
+**Release levels (automatic, never set by hand):** every PR gets a `level:N-…` label + `release-level` status from the `release-level` workflow (rules on the base branch, `.github/release-levels.conf`):
+L0 docs · L1 safe-ui (screens only, no dependencies/config/sensitive files, calls nothing new on the server) · L2 sensitive (login, billing, routing, build config, dependencies, workflows, unclassified paths, or a server name the base branch never used) · L3 server (Edge Functions, Pages Functions, workers) · L4 database (migrations → migration queue).
+Only L0/L1 may be released during the day, and only when Nizan presses "למזג עכשיו" in Night releases for a repo where day merges are on. Everything else merges at night. Keep L1 PRs small and screens-only so they can go out by day; put server/DB work in its own PR.
+**Never:** add/remove `level:*` labels, post a `release-level` or `release-window` status yourself, or edit `.github/release-levels.conf` / `.github/scripts/release-level.sh` to lower a level.
+
 ### This repo
 Merging does NOT deploy. Production deploy is a manual SSH deploy to the WhatsApp server — **only inside the window** (or with the off-window line). A service restart disconnects WhatsApp sessions, so this matters as much as a frontend deploy.
 

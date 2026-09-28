@@ -1,0 +1,48 @@
+# release-level — classifies every PR by how risky it is to release, automatically.
+#   L0 docs        — docs / task files / agent rules only. Never affects users.
+#   L1 safe-ui     — screens only, no dependencies, no sensitive files, calls nothing new on the server.
+#   L2 sensitive   — screens that touch login, billing/payments, routing, build config, dependencies,
+#                    workflows, or call a server function/table that isn't referenced on the base branch yet.
+#   L3 server      — Edge Functions / server code (deploy step needed).
+#   L4 database    — schema migrations (go through the migration queue).
+# The highest level found wins. Result: label `level:N-…` + commit status `release-level`.
+# Only L0/L1 may ever be released during the day, and only after Nizan approves "merge now" in otomator-admin.
+# Per-repo rules live in .github/release-levels.conf. Agents never set level labels by hand.
+name: release-level
+
+# pull_request_target: the workflow + script + rules come from the BASE branch, so a PR can't rewrite its own
+# classification. The PR head is only fetched as data (git diff / git grep) — never checked out or executed.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  statuses: write
+
+concurrency:
+  group: release-level-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+      - name: Fetch PR head as data only
+        run: git fetch -q origin "pull/${{ github.event.pull_request.number }}/head:pr-head"
+      - name: Classify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: pr-head
+        run: bash .github/scripts/release-level.sh

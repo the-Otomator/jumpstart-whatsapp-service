@@ -16,3 +16,8 @@ PARTIAL — Pending night window: Phase B
 - No preview was added: this is a manually deployed server with no preview environment. Feature branches remain locally/unit tested, and production SSH deploys remain night-window-only.
 - Real preview link: not applicable by the task's explicit repository exception.
 - Phase B remains pending because Israel time was 11:49, outside the night window.
+
+## release-levels
+
+- Added the canonical classifier/workflow, WhatsApp service config, updated nightly workflow, and contract text. This repo intentionally still has no `release-window.yml` gate.
+- Validation: the two present workflow YAML files parsed via Prettier; `bash -n` passed. WSL cannot resolve the Windows worktree gitdir for fixture dry runs; no rule was relaxed.

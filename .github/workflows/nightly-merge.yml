@@ -2,12 +2,14 @@
 # Hourly: reports this repo's open PRs to the release-ops Edge Function (admin shows them).
 # 23:15 IL: asks release-ops which PRs are approved for tonight (each approval pinned to a head SHA),
 #           merges them one by one (10 min apart), dispatches the deploy workflow if set, reports results.
+# Day path (every 30 min): PRs Nizan marked "merge now" are merged during the day ONLY if the repo has day merges
+# enabled in admin AND the PR re-classifies (from the base branch, right now) as L0/L1 via release-level.sh.
 # Approval lives ONLY in otomator-admin. Agents never approve, never edit this file to weaken it.
 name: nightly-merge
 
 on:
   schedule:
-    - cron: '35 * * * *'       # hourly sync
+    - cron: '5,35 * * * *'     # sync + day-merge check every 30 min
     - cron: '15 20,21 * * *'   # 23:15 IL (20:15 UTC summer / 21:15 UTC winter; script checks IL hour)
   workflow_dispatch:
     inputs:
@@ -22,7 +24,7 @@ permissions:
   issues: write
   actions: write
   checks: read
-  statuses: read
+  statuses: write
 
 concurrency:
   group: nightly-merge
@@ -39,6 +41,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PROD_BRANCH }}
+          fetch-depth: 0
       - name: Sync / merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -76,7 +82,42 @@ jobs:
                         release_manual:((.body // "") | test("(?im)^\\s*Release:\\s*manual\\b"))}]')
           ops "$(jq -nc --arg repo "$REPO" --arg b "$PROD_BRANCH" --argjson prs "$prs" '{action:"sync",repo:$repo,base:$b,prs:$prs}')" >/dev/null
           echo "Synced $(jq length <<<"$prs") open PR(s)."
-          [ "$mode" = "merge" ] || exit 0
+          if [ "$mode" != "merge" ]; then
+            # ---------- day path: "merge now" approvals, L0/L1 only ----------
+            in_window && exit 0   # the night run handles everything in the window
+            dplan=$(ops "$(jq -nc --arg repo "$REPO" '{action:"plan",repo:$repo,mode:"day"}')")
+            [ "$(jq -r '.day_enabled // false' <<<"$dplan")" = "true" ] || exit 0
+            [ "$(jq -r '.paused // false' <<<"$dplan")" = "true" ] && exit 0
+            dres='[]'
+            dadd() { dres=$(jq -c --argjson n "$1" --arg sha "$2" --arg o "$3" --arg r "$4" --arg m "${5:-}" \
+                     '. + [{number:$n,approved_sha:$sha,outcome:$o,reason:($r|gsub("[\\r\\n|]+";" ")),merge_sha:$m}]' <<<"$dres"); echo "DAY PR #$1: $3 — $4"; }
+            while read -r item; do
+              [ -n "$item" ] || continue
+              n=$(jq -r .number <<<"$item"); sha=$(jq -r .head_sha <<<"$item")
+              pr=$(gh pr view "$n" --json state,headRefOid,mergeStateStatus,isDraft,baseRefName)
+              if [ "$(jq -r .state <<<"$pr")" != "OPEN" ] || [ "$(jq -r .isDraft <<<"$pr")" = "true" ]; then dadd "$n" "$sha" skipped "not open / draft"; continue; fi
+              if [ "$(jq -r .headRefOid <<<"$pr")" != "$sha" ]; then dadd "$n" "$sha" skipped "new commits after approval — re-approve"; continue; fi
+              git fetch -q origin "pull/$n/head:pr-$n"
+              lvl=$(BASE="$PROD_BRANCH" HEAD_REF="pr-$n" DRY_RUN=1 bash .github/scripts/release-level.sh | sed -n 's/^LEVEL=//p')
+              if [ -z "$lvl" ] || [ "$lvl" -gt 1 ]; then dadd "$n" "$sha" skipped "level L${lvl:-?} — not allowed during the day, stays for the night"; continue; fi
+              gh api -X POST "repos/$REPO/statuses/$sha" -f state=success -f context=release-window -f description="Day release approved in admin (L$lvl)" >/dev/null
+              sleep 20
+              ms=$(gh pr view "$n" --json mergeStateStatus --jq .mergeStateStatus)
+              case "$ms" in CLEAN|HAS_HOOKS|UNSTABLE) ;; *) dadd "$n" "$sha" skipped "not mergeable: $ms"; continue;; esac
+              if out=$(gh pr merge "$n" --merge --match-head-commit "$sha" 2>&1); then
+                msha=$(gh pr view "$n" --json mergeCommit --jq '.mergeCommit.oid // ""'); note="day merge (L$lvl) by nightly-merge ($RUN_URL)"
+                if [ -n "$DEPLOY_WORKFLOW" ]; then gh workflow run "$DEPLOY_WORKFLOW" --ref "$PROD_BRANCH" && note="$note; deploy dispatched" || note="$note; DEPLOY DISPATCH FAILED"; fi
+                gh pr comment "$n" --body "☀️ Day release: $note" >/dev/null || true
+                dadd "$n" "$sha" merged "$note" "$msha"
+              else
+                dadd "$n" "$sha" failed "$(tail -c 300 <<<"$out")"
+              fi
+            done < <(jq -c '.approved_now // [] | .[]' <<<"$dplan")
+            if [ "$(jq length <<<"$dres")" -gt 0 ]; then
+              ops "$(jq -nc --arg repo "$REPO" --arg u "$RUN_URL" --argjson r "$dres" '{action:"report",repo:$repo,run_url:$u,paused:false,mode:"day",results:$r}')" >/dev/null
+            fi
+            exit 0
+          fi
 
           # ---------- merge ----------
           if ! in_window; then echo "::warning::Outside 23:00-06:00 IL — merge mode refused."; exit 0; fi
