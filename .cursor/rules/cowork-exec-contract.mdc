@@ -1,0 +1,32 @@
+---
+description: Cowork execution contract
+alwaysApply: true
+---
+
+<!-- COWORK-EXEC-CONTRACT v2 — RELEASE WINDOWS (canonical text, identical in every repo) -->
+## Release windows — production changes only at night
+
+**Window:** 23:00–06:00 Asia/Jerusalem, every night.
+
+Inside the window only:
+- merging a PR to `main` in a repo where merge auto-deploys to production (see "This repo" below);
+- any production frontend/app deploy (Cloudflare Pages `--branch main`, Lovable, SSH deploy, `wrangler deploy`);
+- any Supabase Edge Function deploy to `dgxnnwnugdxzeopleera` or `mzalzjtsyrjycaxolldv`;
+- any database schema change. JumpStart DB (`dgxnnwnugdxzeopleera`): ONLY through the production migration queue (`public.migration_queue_submit`), never applied directly. otomator-admin DB (`mzalzjtsyrjycaxolldv`): inside the window only.
+
+Allowed at any hour: build, test, commit, push branches, open/update PRs, preview deploys (never the production project), read-only queries.
+
+**Off-window exception:** only when the task file contains the exact line
+`Off-window approved by Nizan: <YYYY-MM-DD HH:MM> — <reason>`
+Cowork writes that line only after Nizan approved it explicitly in chat. "Authorized now: merge/deploy" alone does NOT override the window.
+
+**If the window blocks you:** stop right before the gated action, finish everything else, and write `Pending night window: <action>` in result.md. Do not wait, loop or sleep until the window.
+
+**Never:** add the `off-window-approved` label yourself, disable/skip/re-run-to-bypass the `release-window` check, use admin/bypass merge, or push directly to `main`.
+
+**Night releases (how merges actually happen):** a PR that only needs merging is merged by the `nightly-merge` workflow at 23:15 IL — after Nizan approves it in otomator-admin → "שחרורי לילה". Your job ends at "PR ready": report the PR number and write `Pending night window: merge (approve PR #<n> in Night releases)` in result.md.
+If the PR needs steps after the merge (Edge Function deploy, migration-queue submit, live verification, anything beyond the merge itself), put the line `Release: manual` in the PR body; such PRs are never auto-merged and the task file's night phase is run in Cursor instead.
+**Never:** approve, unapprove or pause anything in Night releases, write to the `release_*` tables, or edit `nightly-merge.yml` / `release-window.yml` to weaken them.
+
+### This repo
+Merging does NOT deploy. Production deploy is a manual SSH deploy to the WhatsApp server — **only inside the window** (or with the off-window line). A service restart disconnects WhatsApp sessions, so this matters as much as a frontend deploy.

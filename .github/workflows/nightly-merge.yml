@@ -1,0 +1,125 @@
+# nightly-merge — merges PRs Nizan approved in otomator-admin ("Night releases"), 23:15 Asia/Jerusalem.
+# Hourly: reports this repo's open PRs to the release-ops Edge Function (admin shows them).
+# 23:15 IL: asks release-ops which PRs are approved for tonight (each approval pinned to a head SHA),
+#           merges them one by one (10 min apart), dispatches the deploy workflow if set, reports results.
+# Approval lives ONLY in otomator-admin. Agents never approve, never edit this file to weaken it.
+name: nightly-merge
+
+on:
+  schedule:
+    - cron: '35 * * * *'       # hourly sync
+    - cron: '15 20,21 * * *'   # 23:15 IL (20:15 UTC summer / 21:15 UTC winter; script checks IL hour)
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [sync, merge]
+        default: sync
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+  checks: read
+  statuses: read
+
+concurrency:
+  group: nightly-merge
+  cancel-in-progress: false
+
+env:
+  PROD_BRANCH: master
+  DEPLOY_WORKFLOW: ''
+  GATE_WORKFLOW: ''
+  GAP_SECONDS: '600'
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Sync / merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_MODE: ${{ github.event.inputs.mode }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OPS_URL: ${{ vars.RELEASE_OPS_URL }}
+          OPS_SECRET: ${{ secrets.RELEASE_OPS_SECRET }}
+        run: |
+          set -euo pipefail
+          il_hour() { h=$(TZ=Asia/Jerusalem date +%H); echo $((10#$h)); }
+          in_window() { local h; h=$(il_hour); [ "$h" -ge 23 ] || [ "$h" -lt 6 ]; }
+          ops() { # $1 = JSON body; prints response
+            curl -sS --fail-with-body -m 30 -X POST "$OPS_URL" \
+              -H 'content-type: application/json' -H "x-release-secret: $OPS_SECRET" -d "$1"
+          }
+          if [ -z "${OPS_URL:-}" ] || [ -z "${OPS_SECRET:-}" ]; then
+            echo "::notice::RELEASE_OPS_URL / RELEASE_OPS_SECRET not set yet — nothing to do."; exit 0
+          fi
+
+          mode=sync
+          if [ "$EVENT" = "workflow_dispatch" ]; then mode="${INPUT_MODE:-sync}"; fi
+          if [ "$EVENT" = "schedule" ] && [ "$SCHEDULE" = "15 20,21 * * *" ]; then
+            if [ "$(il_hour)" -eq 23 ]; then mode=merge; else echo "Not 23:xx IL (DST twin cron) — skip."; exit 0; fi
+          fi
+
+          # ---------- sync: report open PRs ----------
+          prs=$(gh pr list --base "$PROD_BRANCH" --state open --limit 100 \
+                 --json number,title,author,url,headRefOid,isDraft,labels,mergeStateStatus,updatedAt,body \
+                 --jq '[.[] | {number,title,author:.author.login,url,head_sha:.headRefOid,draft:.isDraft,
+                        labels:[.labels[].name],merge_state:.mergeStateStatus,updated_at:.updatedAt,
+                        release_manual:((.body // "") | test("(?im)^\\s*Release:\\s*manual\\b"))}]')
+          ops "$(jq -nc --arg repo "$REPO" --arg b "$PROD_BRANCH" --argjson prs "$prs" '{action:"sync",repo:$repo,base:$b,prs:$prs}')" >/dev/null
+          echo "Synced $(jq length <<<"$prs") open PR(s)."
+          [ "$mode" = "merge" ] || exit 0
+
+          # ---------- merge ----------
+          if ! in_window; then echo "::warning::Outside 23:00-06:00 IL — merge mode refused."; exit 0; fi
+          plan=$(ops "$(jq -nc --arg repo "$REPO" '{action:"plan",repo:$repo}')")
+          paused=$(jq -r '.paused // false' <<<"$plan"); max=$(jq -r '.max_per_night // 5' <<<"$plan")
+          results='[]'
+          add() { results=$(jq -c --argjson n "$1" --arg sha "$2" --arg o "$3" --arg r "$4" --arg m "${5:-}" \
+                   '. + [{number:$n,approved_sha:$sha,outcome:$o,reason:($r|gsub("[\\r\\n|]+";" ")),merge_sha:$m}]' <<<"$results"); echo "PR #$1: $3 — $4"; }
+          if [ "$paused" = "true" ]; then
+            ops "$(jq -nc --arg repo "$REPO" --arg u "$RUN_URL" '{action:"report",repo:$repo,run_url:$u,paused:true,results:[]}')" >/dev/null
+            echo "Paused in admin."; exit 0
+          fi
+          if [ -n "$GATE_WORKFLOW" ]; then gh workflow run "$GATE_WORKFLOW" --ref "$PROD_BRANCH" || true; sleep 90; fi
+          merged=0; first=1
+          while read -r item; do
+            [ -n "$item" ] || continue
+            n=$(jq -r .number <<<"$item"); sha=$(jq -r .head_sha <<<"$item")
+            if [ "$merged" -ge "$max" ]; then add "$n" "$sha" skipped "nightly limit ($max) reached"; continue; fi
+            pr=$(gh pr view "$n" --json state,headRefOid,mergeStateStatus,isDraft,baseRefName)
+            st=$(jq -r .state <<<"$pr"); head=$(jq -r .headRefOid <<<"$pr"); ms=$(jq -r .mergeStateStatus <<<"$pr")
+            if [ "$ms" = "UNKNOWN" ]; then sleep 15; pr=$(gh pr view "$n" --json state,headRefOid,mergeStateStatus,isDraft,baseRefName); ms=$(jq -r .mergeStateStatus <<<"$pr"); fi
+            if [ "$ms" = "BLOCKED" ]; then sleep 120; ms=$(gh pr view "$n" --json mergeStateStatus --jq .mergeStateStatus); fi
+            if [ "$st" != "OPEN" ]; then add "$n" "$sha" skipped "PR is $st"; continue; fi
+            if [ "$(jq -r .baseRefName <<<"$pr")" != "$PROD_BRANCH" ]; then add "$n" "$sha" skipped "base is not $PROD_BRANCH"; continue; fi
+            if [ "$(jq -r .isDraft <<<"$pr")" = "true" ]; then add "$n" "$sha" skipped "draft"; continue; fi
+            if [ "$head" != "$sha" ]; then add "$n" "$sha" skipped "new commits after approval ($head) — re-approve"; continue; fi
+            case "$ms" in CLEAN|HAS_HOOKS|UNSTABLE) ;; *) add "$n" "$sha" skipped "not mergeable: $ms"; continue;; esac
+            if [ "$first" -eq 0 ]; then sleep "$GAP_SECONDS"; fi
+            first=0
+            if out=$(gh pr merge "$n" --merge --match-head-commit "$sha" 2>&1); then
+              msha=$(gh pr view "$n" --json mergeCommit --jq '.mergeCommit.oid // ""')
+              merged=$((merged+1))
+              note="merged by nightly-merge ($RUN_URL)"
+              if [ -n "$DEPLOY_WORKFLOW" ]; then
+                if gh workflow run "$DEPLOY_WORKFLOW" --ref "$PROD_BRANCH"; then note="$note; deploy dispatched"; else note="$note; DEPLOY DISPATCH FAILED"; fi
+              fi
+              [ "$ms" = "UNSTABLE" ] && note="$note; non-required checks failing"
+              gh pr comment "$n" --body "🌙 Night release: $note" >/dev/null || true
+              add "$n" "$sha" merged "$note" "$msha"
+            else
+              add "$n" "$sha" failed "$(tail -c 300 <<<"$out")"
+            fi
+          done < <(jq -c '.approved // [] | .[]' <<<"$plan")
+          ops "$(jq -nc --arg repo "$REPO" --arg u "$RUN_URL" --argjson r "$results" '{action:"report",repo:$repo,run_url:$u,paused:false,results:$r}')" >/dev/null
+          { echo "### Night release $(TZ=Asia/Jerusalem date '+%F %H:%M') IL"; echo; echo '| PR | outcome | reason |'; echo '|---|---|---|';
+            jq -r '.[] | "| #\(.number) | \(.outcome) | \(.reason) |"' <<<"$results"; } >> "$GITHUB_STEP_SUMMARY"
