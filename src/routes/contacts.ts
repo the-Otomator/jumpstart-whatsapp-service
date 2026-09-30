@@ -18,6 +18,36 @@ import type {
 
 const router = Router()
 
+/** Baileys queries can hang forever when an IQ reply never arrives. */
+const WA_QUERY_TIMEOUT_MS = 8_000
+
+class WaQueryTimeoutError extends Error {
+  constructor(readonly label: string) {
+    super(`${label} timed out after ${WA_QUERY_TIMEOUT_MS}ms`)
+    this.name = 'WaQueryTimeoutError'
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, label: string, onTimeout: () => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      onTimeout()
+      reject(new WaQueryTimeoutError(label))
+    }, WA_QUERY_TIMEOUT_MS)
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
+  })
+}
+
 // ── Per-(orgId, phone) profile cache ────────────────────────────
 //
 // Profiles change rarely; Baileys' fetches are cheap but rate-limited by
@@ -148,7 +178,9 @@ router.get(
 
     try {
       const jid = `${normalized}@s.whatsapp.net`
-      const result = await sock.onWhatsApp(jid)
+      const result = await withTimeout(sock.onWhatsApp(jid), 'onWhatsApp', () => {
+        log.warn({ phone: normalized, label: 'onWhatsApp' })
+      })
       const exists = Boolean(result?.[0]?.exists)
 
       const response: ContactExistsResponse = {
@@ -159,6 +191,10 @@ router.get(
       }
       res.json(response)
     } catch (err) {
+      if (err instanceof WaQueryTimeoutError) {
+        res.status(504).json({ code: 'WA_QUERY_TIMEOUT' })
+        return
+      }
       log.error({ phone: normalized, err: (err as Error).message }, 'Contact exists check failed')
       res.status(500).json({ error: (err as Error).message, code: 'CONTACT_EXISTS_FAILED' })
     }
@@ -197,7 +233,9 @@ router.get(
       const jid = `${normalized}@s.whatsapp.net`
 
       // 1. Existence check first — short-circuit if the number isn't on WA.
-      const onWaResult = await sock.onWhatsApp(jid)
+      const onWaResult = await withTimeout(sock.onWhatsApp(jid), 'onWhatsApp', () => {
+        log.warn({ phone: normalized, label: 'onWhatsApp' })
+      })
       const existsRaw = onWaResult?.[0]?.exists
       const exists = Boolean(existsRaw)
 
@@ -216,7 +254,9 @@ router.get(
       // 2. Pull picture / about / business profile / catalog in parallel — each is
       //    independently optional and a failure on one shouldn't kill the rest.
       const [pictureUrl, statusList, businessProfile, catalogRaw] = await Promise.all([
-        sock.profilePictureUrl(jid, 'image').catch((err: any) => {
+        withTimeout(sock.profilePictureUrl(jid, 'image'), 'profilePictureUrl', () => {
+          log.warn({ phone: normalized, label: 'profilePictureUrl' })
+        }).catch((err: any) => {
           // Baileys throws Boom 404 when the user hides their picture or has none
           const status = err?.output?.statusCode ?? err?.data?.statusCode
           if (status !== 404 && status !== 401) {
@@ -224,15 +264,21 @@ router.get(
           }
           return undefined
         }),
-        sock.fetchStatus(jid).catch((err: any) => {
+        withTimeout(sock.fetchStatus(jid), 'fetchStatus', () => {
+          log.warn({ phone: normalized, label: 'fetchStatus' })
+        }).catch((err: any) => {
           log.debug({ phone: normalized, err: err?.message }, 'fetchStatus failed')
           return undefined
         }),
-        sock.getBusinessProfile(jid).catch((err: any) => {
+        withTimeout(sock.getBusinessProfile(jid), 'getBusinessProfile', () => {
+          log.warn({ phone: normalized, label: 'getBusinessProfile' })
+        }).catch((err: any) => {
           log.debug({ phone: normalized, err: err?.message }, 'getBusinessProfile failed')
           return undefined
         }),
-        sock.getCatalog({ jid, limit: 20 }).catch((err: any) => {
+        withTimeout(sock.getCatalog({ jid, limit: 20 }), 'getCatalog', () => {
+          log.warn({ phone: normalized, label: 'getCatalog' })
+        }).catch((err: any) => {
           log.debug({ phone: normalized, err: err?.message }, 'getCatalog failed')
           return undefined
         }),
@@ -263,6 +309,10 @@ router.get(
       res.setHeader('X-Cache', 'MISS')
       res.json(response)
     } catch (err) {
+      if (err instanceof WaQueryTimeoutError) {
+        res.status(504).json({ code: 'WA_QUERY_TIMEOUT' })
+        return
+      }
       log.error({ phone: normalized, err: (err as Error).message }, 'Contact profile fetch failed')
       res.status(500).json({ error: (err as Error).message, code: 'CONTACT_PROFILE_FAILED' })
     }
