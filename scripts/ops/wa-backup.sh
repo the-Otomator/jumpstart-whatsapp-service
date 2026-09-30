@@ -45,7 +45,9 @@ aws s3 cp --only-show-errors --endpoint-url "$R2_ENDPOINT" "$ARCHIVE" "s3://$R2_
 CUTOFF="$(date -u -d "-$RETENTION_DAYS days" +%Y%m%d)"
 aws s3 ls --endpoint-url "$R2_ENDPOINT" --recursive "s3://$R2_BUCKET/$HOST/" | awk '{print $4}' | while read -r key; do
   date_part="$(grep -oE '[0-9]{8}T' <<<"$key" | tr -d T || true)"
-  [ -n "$date_part" ] && [ "$date_part" -lt "$CUTOFF" ] && aws s3 rm --only-show-errors --endpoint-url "$R2_ENDPOINT" "s3://$R2_BUCKET/$key"
+  if [ -n "$date_part" ] && [ "$date_part" -lt "$CUTOFF" ]; then
+    aws s3 rm --only-show-errors --endpoint-url "$R2_ENDPOINT" "s3://$R2_BUCKET/$key"
+  fi
 done
 
 date +%s > "$STATE/last_success"
