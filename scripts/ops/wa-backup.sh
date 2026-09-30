@@ -14,7 +14,7 @@ mkdir -p "$STATE"
 HOST="$(hostname -s)"; TS="$(date -u +%Y%m%dT%H%M%SZ)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-trap 'code=$?; printf "FAIL %s exit=%s\n" "$TS" "$code" > "$STATE/last_status"; exit "$code"' ERR
+trap 'code=$?; printf "FAIL %s exit=%s line=%s command=%q\n" "$TS" "$code" "$LINENO" "$BASH_COMMAND" | tee "$STATE/last_status" >&2; exit "$code"' ERR
 
 VOLUME="$(docker volume ls -q | grep -E '(^|_)sessions-data$' | head -n1)"
 [ -n "$VOLUME" ] || { echo "sessions-data volume not found" >&2; exit 1; }
