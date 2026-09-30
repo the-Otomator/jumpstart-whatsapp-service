@@ -46,10 +46,13 @@ Multi-tenant WhatsApp microservice built on Baileys (unofficial WhatsApp Web API
 | **Host** | `wa-prod-1` — Hetzner CCX13, Nuremberg |
 | **IP** | `178.104.118.178` |
 | **Domain** | `wa.otomator.pro` (Cloudflare proxied — orange cloud ON) |
-| **SSL** | Cloudflare "Full" mode + self-signed cert on origin (`/etc/nginx/ssl/`) |
+| **SSL** | nginx TLS at `/etc/nginx/ssl/`; Cloudflare Origin CA replacement + Full (strict) remain pending |
 | **App dir** | `/opt/whatsapp-service` |
 | **Logs** | `cd /opt/whatsapp-service && docker compose logs -f` |
 | **Health** | `https://wa.otomator.pro/health` |
+| **SSH** | `ssh deploy@178.104.118.178` (key only; production deploys use the non-root sudo user) |
+| **Firewall** | Hetzner `wa-fw` + UFW: public key-only SSH with fail2ban; HTTP(S) from Cloudflare only |
+| **Backup** | Nightly encrypted `sessions-data`, app environment, and nginx config to private R2 `wa-backups`; 14-day retention |
 
 > Previous server (decommissioned): Hostinger 147.93.127.180
 
@@ -59,7 +62,8 @@ Multi-tenant WhatsApp microservice built on Baileys (unofficial WhatsApp Web API
 - **Dev**: `npm run dev`
 - **Start**: `npm start`
 - **Docker**: `docker compose up --build`
-- **Deploy to prod**: `ssh root@178.104.118.178 "cd /opt/whatsapp-service && git pull && docker compose up -d --build"`
+- **Deploy to prod**: `ssh deploy@178.104.118.178 "cd /opt/whatsapp-service && sudo ./scripts/deploy.sh"`
+- **Backup status**: `ssh deploy@178.104.118.178 "sudo cat /var/lib/wa-backup/last_status"`
 
 ## Architecture
 
