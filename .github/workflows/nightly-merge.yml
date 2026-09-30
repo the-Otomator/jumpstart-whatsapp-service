@@ -78,10 +78,25 @@ jobs:
           prs=$(gh pr list --base "$PROD_BRANCH" --state open --limit 100 \
                  --json number,title,author,url,headRefOid,isDraft,labels,mergeStateStatus,updatedAt,body \
                  --jq '[.[] | {number,title,author:.author.login,url,head_sha:.headRefOid,draft:.isDraft,
-                        labels:[.labels[].name],merge_state:.mergeStateStatus,updated_at:.updatedAt,
+                        labels:[.labels[].name],merge_state:.mergeStateStatus,updated_at:.updatedAt,body:(.body // ""),
                         release_manual:((.body // "") | test("(?im)^\\s*Release:\\s*manual\\b"))}]')
           ops "$(jq -nc --arg repo "$REPO" --arg b "$PROD_BRANCH" --argjson prs "$prs" '{action:"sync",repo:$repo,base:$b,prs:$prs}')" >/dev/null
           echo "Synced $(jq length <<<"$prs") open PR(s)."
+          while IFS= read -r item; do
+            [ -n "$item" ] || continue
+            n=$(jq -r .number <<<"$item"); sha=$(jq -r .head_sha <<<"$item")
+            file_data=$(gh api --paginate --slurp "repos/$REPO/pulls/$n/files?per_page=100" | jq -c 'add | map({path:.filename,status:.status,blob_sha:.sha})')
+            files=$(jq -c '[.[].path]' <<<"$file_data")
+            removed=$(jq -c '[.[] | select(.status == "removed") | .path]' <<<"$file_data")
+            migrations='[]'
+            while IFS= read -r file; do
+              [ -n "$file" ] || continue
+              path=$(jq -r .path <<<"$file"); blob=$(jq -r .blob_sha <<<"$file")
+              sql=$(gh api "repos/$REPO/git/blobs/$blob" --jq .content | base64 -d)
+              migrations=$(jq -cn --argjson old "$migrations" --arg path "$path" --arg sql "$sql" '$old + [{path:$path,sql:$sql}]')
+            done < <(jq -c '.[] | select(.status != "removed" and (.path | test("^supabase/migrations/[0-9]{14}_.+\\.sql$")))' <<<"$file_data")
+            ops "$(jq -nc --arg repo "$REPO" --argjson n "$n" --arg sha "$sha" --argjson files "$files" --argjson removed "$removed" --argjson migrations "$migrations" '{action:"sync_detail",repo:$repo,number:$n,head_sha:$sha,files:$files,removed_files:$removed,migrations:$migrations}')" >/dev/null
+          done < <(jq -c '.[]' <<<"$prs")
           if [ "$mode" != "merge" ]; then
             # ---------- day path: "merge now" approvals, L0/L1 only ----------
             in_window && exit 0   # the night run handles everything in the window
