@@ -34,6 +34,12 @@ mapfile -t delete_numbers < <(ufw status numbered | while IFS= read -r line; do
 done | sort -rn)
 for number in "${delete_numbers[@]}"; do yes | ufw delete "$number" >/dev/null; done
 
+# Remove common pre-hardening rules by specification as a fallback for UFW's
+# profile and IPv6 display variants, which are not stable enough to parse.
+ufw --force delete allow 80/tcp >/dev/null 2>&1 || true
+ufw --force delete allow 443/tcp >/dev/null 2>&1 || true
+ufw --force delete allow 'Nginx Full' >/dev/null 2>&1 || true
+
 ufw default deny incoming >/dev/null
 ufw default allow outgoing >/dev/null
 ufw --force enable >/dev/null

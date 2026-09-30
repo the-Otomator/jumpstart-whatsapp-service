@@ -37,6 +37,8 @@ SIZE="$(stat -c %s "$ARCHIVE")"
 [ "$SIZE" -gt 1024 ] || { echo "archive too small" >&2; exit 1; }
 
 export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" AWS_DEFAULT_REGION=auto
+# R2 does not accept every optional checksum trailer emitted by newer AWS CLI v2.
+export AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED AWS_RESPONSE_CHECKSUM_VALIDATION=WHEN_REQUIRED
 KEY="$HOST/$(date -u +%Y/%m)/$(basename "$ARCHIVE")"
 aws s3 cp --only-show-errors --endpoint-url "$R2_ENDPOINT" "$ARCHIVE" "s3://$R2_BUCKET/$KEY"
 
