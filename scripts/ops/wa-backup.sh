@@ -29,7 +29,7 @@ done
 git -C "$APP_DIR" rev-parse HEAD > "$WORK/stage/config/git-head" 2>/dev/null || true
 
 ARCHIVE="$WORK/wa-$HOST-$TS.tar.gz.age"
-tar -czf - --warning=no-file-changed --exclude='./*/media' \
+tar -czf - --ignore-failed-read --warning=no-file-changed --exclude='./*/media' \
   --transform 's,^\./,sessions/,' -C "$MOUNTPOINT" . \
   -C "$WORK/stage" config \
   | age -r "$AGE_PUBLIC_KEY" -o "$ARCHIVE"
