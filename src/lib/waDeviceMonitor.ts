@@ -6,7 +6,8 @@ import { buildHeartbeatUpdates, type WaDeviceRow } from './waDeviceReconcile'
 import { toWaDeviceStatus } from './disconnectReason'
 
 const HEARTBEAT_INTERVAL_MS = Number(process.env.WA_HEARTBEAT_INTERVAL_MS ?? 60_000)
-const OUTAGE_ALERT_MS = Number(process.env.WA_OUTAGE_ALERT_MS ?? 10 * 60_000)
+// One-minute polling means a four-minute threshold sends before minute five.
+const OUTAGE_ALERT_MS = Number(process.env.WA_OUTAGE_ALERT_MS ?? 4 * 60_000)
 const ALERT_TO = process.env.WA_ALERT_TO_PHONE ?? '972528393669'
 const ALERT_FROM =
   process.env.WA_ALERT_FROM_SESSION_KEY ??
@@ -20,7 +21,8 @@ export function alertsEnabled(): boolean {
 
 /**
  * Pick a healthy connected session to send operational alerts from.
- * Prefer WA_ALERT_FROM_SESSION_KEY when it is up; otherwise any other connected session.
+ * Only the configured operations sender may send alerts. An arbitrary healthy
+ * customer session must never be used as an operational fallback.
  * Pass excludeSessionKey to avoid using a known-down session as the sender.
  */
 export async function resolveAlertSender(excludeSessionKey?: string): Promise<string | null> {
@@ -31,13 +33,7 @@ export async function resolveAlertSender(excludeSessionKey?: string): Promise<st
     }
   }
 
-  const fallback = listActiveSessions().find(
-    (s) =>
-      s.orgId !== excludeSessionKey &&
-      s.status === 'connected' &&
-      isSocketOpen(getBaileysSocket(s.orgId))
-  )
-  return fallback?.orgId ?? null
+  return null
 }
 
 export function getAlertToPhone(): string {
@@ -48,6 +44,8 @@ let heartbeatFailures = 0
 let timer: ReturnType<typeof setInterval> | null = null
 /** Wall-clock when a live session first became non-connected (in-memory). */
 const nonConnectedSince = new Map<string, number>()
+const alertedInMemory = new Set<string>()
+let alertedAtColumnAvailable: boolean | null = null
 
 export function getHeartbeatFailures(): number {
   return heartbeatFailures
@@ -56,18 +54,33 @@ export function getHeartbeatFailures(): number {
 export function resetHeartbeatFailuresForTests(): void {
   heartbeatFailures = 0
   nonConnectedSince.clear()
+  alertedInMemory.clear()
+  alertedAtColumnAvailable = null
 }
 
 async function fetchDeviceRows(sessionKeys: string[]): Promise<WaDeviceRow[]> {
   if (!jumpstartSupabase || sessionKeys.length === 0) return []
+  const baseColumns = 'id, organization_id, name, session_key, status, phone_number, last_error'
+  if (alertedAtColumnAvailable !== false) {
+    const { data, error } = await jumpstartSupabase
+      .from('wa_devices')
+      .select(`${baseColumns}, alerted_at`)
+      .in('session_key', sessionKeys)
+    if (!error) {
+      alertedAtColumnAvailable = true
+      return (data ?? []) as WaDeviceRow[]
+    }
+    if (error.code !== '42703' && !error.message.includes('alerted_at')) {
+      throw new Error(error.message)
+    }
+    alertedAtColumnAvailable = false
+    logger.warn('wa_devices.alerted_at is unavailable; using in-memory outage deduplication')
+  }
   const { data, error } = await jumpstartSupabase
     .from('wa_devices')
-    .select('id, organization_id, name, session_key, status, phone_number, last_error, alerted_at')
+    .select(baseColumns)
     .in('session_key', sessionKeys)
-
-  if (error) {
-    throw new Error(error.message)
-  }
+  if (error) throw new Error(error.message)
   return (data ?? []) as WaDeviceRow[]
 }
 
@@ -148,20 +161,21 @@ async function processOutageAlerts(liveKeys: string[]): Promise<void> {
       isSocketOpen(getBaileysSocket(key))
 
     if (connected) {
-      if (row.alerted_at) {
+      if (row.alerted_at || alertedInMemory.has(key)) {
         await sendRecoveryAndClear(row)
+        alertedInMemory.delete(key)
       }
       continue
     }
 
     if (!since || now - since < OUTAGE_ALERT_MS) continue
-    if (row.alerted_at) continue
+    if (row.alerted_at || alertedInMemory.has(key)) continue
 
-    await sendOutageAlert(row, now - since)
+    if (await sendOutageAlert(row, now - since)) alertedInMemory.add(key)
   }
 }
 
-async function sendOutageAlert(row: WaDeviceRow, durationMs: number): Promise<void> {
+async function sendOutageAlert(row: WaDeviceRow, durationMs: number): Promise<boolean> {
   const mins = Math.round(durationMs / 60_000)
   const text =
     `⚠️ WA session down\n` +
@@ -177,7 +191,7 @@ async function sendOutageAlert(row: WaDeviceRow, durationMs: number): Promise<vo
       { sessionKey: row.session_key, name: row.name },
       'Outage alert suppressed — no healthy alerting session'
     )
-    return
+    return false
   }
 
   try {
@@ -189,13 +203,18 @@ async function sendOutageAlert(row: WaDeviceRow, durationMs: number): Promise<vo
       type: 'text',
       message: text,
     })
-    await jumpstartSupabase!
-      .from('wa_devices')
-      .update({ alerted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq('id', row.id)
+    if (alertedAtColumnAvailable) {
+      const { error } = await jumpstartSupabase!
+        .from('wa_devices')
+        .update({ alerted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', row.id)
+      if (error) logger.warn({ error: error.message }, 'Outage alert sent but marker write failed')
+    }
     logger.info({ sessionKey: row.session_key, sender }, 'Outage alert sent')
+    return true
   } catch (err) {
     logger.warn({ err, sessionKey: row.session_key }, 'Failed to send outage alert')
+    return false
   }
 }
 
@@ -227,10 +246,13 @@ async function sendRecoveryAndClear(row: WaDeviceRow): Promise<void> {
     }
   }
 
-  await jumpstartSupabase!
-    .from('wa_devices')
-    .update({ alerted_at: null, updated_at: new Date().toISOString() })
-    .eq('id', row.id)
+  if (alertedAtColumnAvailable) {
+    const { error } = await jumpstartSupabase!
+      .from('wa_devices')
+      .update({ alerted_at: null, updated_at: new Date().toISOString() })
+      .eq('id', row.id)
+    if (error) logger.warn({ error: error.message }, 'Recovery marker clear failed')
+  }
 }
 
 export function startWaDeviceMonitor(): void {

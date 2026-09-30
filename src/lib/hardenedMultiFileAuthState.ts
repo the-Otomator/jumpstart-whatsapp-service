@@ -35,8 +35,10 @@ function fixFileName(file?: string): string {
  * Independent of Baileys' in-process Mutex; covers saveCreds + keys.set concurrency.
  */
 const folderQueues = new Map<string, Promise<void>>()
+let writeGeneration = 0
 
 function enqueueWrite(folder: string, task: () => Promise<void>): Promise<void> {
+  writeGeneration++
   const prev = folderQueues.get(folder) ?? Promise.resolve()
   const next = prev
     .catch(() => {
@@ -51,6 +53,17 @@ function enqueueWrite(folder: string, task: () => Promise<void>): Promise<void> 
     )
   )
   return next
+}
+
+/** Drain all session queues, including writes enqueued by socket-close callbacks. */
+export async function flushAllAuthWrites(): Promise<void> {
+  for (;;) {
+    const generation = writeGeneration
+    await Promise.all([...folderQueues.values()])
+    // Socket-close events can enqueue creds/keys writes on the next event-loop turn.
+    await new Promise<void>((resolve) => setTimeout(resolve, 200))
+    if (generation === writeGeneration) return
+  }
 }
 
 async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {
