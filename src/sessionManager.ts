@@ -25,7 +25,12 @@ export async function startSession(
 
 export function getStatus(orgId: string): Session | undefined {
   const provider = getProviderForOrg(orgId)
-  return provider?.getStatus(orgId)
+  const session = provider?.getStatus(orgId)
+  if (session?.provider === 'baileys' && session.status === 'connected') {
+    const socket = getBaileysSocket(orgId) as { ws?: { readyState?: number } } | undefined
+    if (socket?.ws?.readyState !== 1) return { ...session, status: 'disconnected' }
+  }
+  return session
 }
 
 export function getQR(orgId: string): string | undefined {

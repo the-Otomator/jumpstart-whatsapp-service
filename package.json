@@ -7,7 +7,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "test": "npx ts-node --transpile-only src/lib/crashCapture.test.ts"
+    "test": "ts-node --transpile-only src/lib/crashCapture.test.ts && ts-node --transpile-only src/lib/withTimeout.test.ts && ts-node --transpile-only src/pool/senderPool.resume.test.ts && ts-node --transpile-only src/lib/reliability.test.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

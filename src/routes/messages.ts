@@ -8,14 +8,22 @@ import {
 } from '../middleware/validate'
 import { orgLogger } from '../lib/logger'
 import { getSenderPool } from '../pool'
+import { getProviderForOrg } from '../providers'
 
 const router = Router()
 
 /** Shared by `POST /api/messages/send` and `POST /api/sessions/:orgId/send`. */
 export async function sendWhatsAppMessage(req: SendMessageRequest): Promise<string> {
+  assertSessionConnected(req.orgId)
   const lane = req.lane ?? 'operational'
   const pool = getSenderPool(req.orgId)
   return pool.enqueueAndWait(req, lane)
+}
+
+function assertSessionConnected(sessionKey: string): void {
+  if (getProviderForOrg(sessionKey)?.getStatus(sessionKey)?.status !== 'connected') {
+    throw new Error(`Session ${sessionKey} not connected`)
+  }
 }
 
 // ── Capacity planner (marketing journeys / bulk send) ───────────
@@ -45,6 +53,7 @@ router.post('/send', validateBody(sendMessageSchema), async (req: Request, res: 
 
   try {
     if (body.enqueue && lane === 'marketing') {
+      assertSessionConnected(body.orgId)
       const pool = getSenderPool(body.orgId)
       const jobId = pool.enqueue(body, 'marketing')
       log.info({ to: body.to, type: body.type, jobId, lane }, 'Message enqueued')
@@ -87,6 +96,7 @@ router.post('/send-bulk', validateBody(sendBulkSchema), async (req: Request, res
 
     try {
       if (msg.enqueue && lane === 'marketing') {
+        assertSessionConnected(msg.orgId)
         const pool = getSenderPool(msg.orgId)
         const jobId = pool.enqueue(msg, 'marketing')
         results.push({ to: msg.to, success: true, jobId, queued: true })

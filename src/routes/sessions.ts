@@ -19,6 +19,7 @@ import { getWebhookFailures, clearWebhookFailures } from '../lib/webhookDispatch
 import { orgLogger } from '../lib/logger'
 import { validateOrg, supabase } from '../lib/supabase'
 import { sendWhatsAppMessage } from './messages'
+import { withTimeout } from '../lib/withTimeout'
 
 const router = Router()
 
@@ -91,27 +92,23 @@ router.post(
       return
     }
 
-    const orgCheck = await validateOrg(orgId)
-    if (!orgCheck.valid) {
-      res.status(403).json({
-        error: 'No active subscription for this organization',
-        code: 'ORG_NOT_AUTHORIZED',
-      })
-      return
-    }
-
     try {
-      await startSession(orgId, webhookUrl, providerType ?? 'baileys', {
+      const orgCheck = await withTimeout(validateOrg(orgId), 15_000, 'session_start_timeout')
+      if (!orgCheck.valid) {
+        res.status(403).json({ error: 'No active subscription for this organization', code: 'ORG_NOT_AUTHORIZED' })
+        return
+      }
+      await withTimeout(startSession(orgId, webhookUrl, providerType ?? 'baileys', {
         accessToken: metaAccessToken,
         phoneNumberId: metaPhoneNumberId,
         wabaId: metaWabaId,
-      })
+      }), 15_000, 'session_start_timeout')
       log.info({ provider: providerType ?? 'baileys' }, 'Session start requested')
       const initialStatus = providerType === 'meta-cloud' ? 'connected' : 'connecting'
       res.json({ success: true, orgId, status: initialStatus, provider: providerType ?? 'baileys' })
     } catch (err) {
       log.error({ err }, 'Failed to start session')
-      res.status(500).json({
+      res.status((err as Error).message === 'session_start_timeout' ? 504 : 500).json({
         error: (err as Error).message,
         code: 'SESSION_START_FAILED',
       })

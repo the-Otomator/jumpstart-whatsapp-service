@@ -1,13 +1,18 @@
 /** Default Baileys/pool send ACK wait. Override via WA_SEND_TIMEOUT_MS. */
-export const WA_SEND_TIMEOUT_MS = Number(process.env.WA_SEND_TIMEOUT_MS ?? 20_000)
+function boundedTimeout(value: string | undefined, fallback: number, max: number): number {
+  const parsed = Number(value)
+  return value && Number.isFinite(parsed) && parsed > 0
+    ? Math.min(parsed, max)
+    : fallback
+}
+
+export const WA_SEND_TIMEOUT_MS = boundedTimeout(process.env.WA_SEND_TIMEOUT_MS, 15_000, 20_000)
 
 /**
  * Ceiling for enqueueAndWait: queue wait budget + send timeout + small margin.
  * Override via WA_ENQUEUE_CEILING_MS.
  */
-export const WA_ENQUEUE_CEILING_MS = Number(
-  process.env.WA_ENQUEUE_CEILING_MS ?? WA_SEND_TIMEOUT_MS + 60_000 + 5_000
-)
+export const WA_ENQUEUE_CEILING_MS = boundedTimeout(process.env.WA_ENQUEUE_CEILING_MS, 18_000, 19_000)
 
 /**
  * Race `promise` against a timer. Rejects with `new Error(label)` on expiry.

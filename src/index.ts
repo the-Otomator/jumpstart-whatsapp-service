@@ -22,6 +22,7 @@ import { logger } from './lib/logger'
 import { requestIdMiddleware } from './middleware/requestId'
 import { setupGracefulShutdown } from './lib/shutdown'
 import { installCrashCapture } from './lib/crashCapture'
+import { startDeviceMonitor } from './lib/deviceMonitor'
 
 const execAsync = promisify(exec)
 
@@ -236,6 +237,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 // Start server
 const server = app.listen(PORT, async () => {
   logger.info({ port: PORT }, 'WhatsApp service started')
+  startDeviceMonitor()
 
   // Auto-restore previously connected sessions
   try {

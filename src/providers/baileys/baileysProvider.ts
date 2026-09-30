@@ -371,8 +371,7 @@ export class BaileysProvider implements WhatsAppProvider {
     const ws = (sock as { ws?: { readyState?: number } }).ws
     const WS_OPEN = 1
     if (!ws || ws.readyState !== WS_OPEN) {
-      const session = this.sessions.get(req.orgId)
-      if (session) session.status = 'disconnected'
+      this.onSendTimeout(req.orgId)
       throw new Error(`Session ${req.orgId} not connected`)
     }
 
@@ -419,7 +418,9 @@ export class BaileysProvider implements WhatsAppProvider {
     setTimeout(() => {
       this.intentionallyStoppedOrgIds.delete(orgId)
       if (!this.sockets.has(orgId)) {
-        void this.start(orgId, webhookUrl)
+        void this.start(orgId, webhookUrl).catch((err) =>
+          log.error({ err }, 'Reconnect after send timeout failed')
+        )
       }
     }, 2000)
   }
