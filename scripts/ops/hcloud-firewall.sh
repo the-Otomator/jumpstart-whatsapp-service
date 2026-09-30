@@ -3,7 +3,6 @@
 set -euo pipefail
 
 : "${HCLOUD_TOKEN:?set HCLOUD_TOKEN}"
-ADMIN_IPS="${ADMIN_IPS:?space-separated admin CIDRs}"
 SERVER="${SERVER:-wa-prod-1}"
 FW="${FW:-wa-fw}"
 command -v hcloud >/dev/null || { echo "hcloud CLI is required" >&2; exit 1; }
@@ -13,9 +12,8 @@ rules="$(mktemp)"
 trap 'rm -f "$rules"' EXIT
 cf="$( (curl -fsS --max-time 20 https://www.cloudflare.com/ips-v4; curl -fsS --max-time 20 https://www.cloudflare.com/ips-v6) | grep . | jq -R . | jq -s .)"
 [ "$(jq length <<<"$cf")" -ge 15 ] || { echo "Cloudflare range list failed sanity check" >&2; exit 1; }
-admin="$(printf '%s\n' $ADMIN_IPS ${EXTRA_SSH_IPS:-} | jq -R . | jq -s .)"
-jq -n --argjson admin "$admin" --argjson cf "$cf" '[
-  {direction:"in",protocol:"tcp",port:"22",source_ips:$admin,description:"ssh admin"},
+jq -n --argjson cf "$cf" '[
+  {direction:"in",protocol:"tcp",port:"22",source_ips:["0.0.0.0/0","::/0"],description:"ssh key-only plus fail2ban"},
   {direction:"in",protocol:"tcp",port:"80",source_ips:$cf,description:"http cloudflare"},
   {direction:"in",protocol:"tcp",port:"443",source_ips:$cf,description:"https cloudflare"}
 ]' > "$rules"

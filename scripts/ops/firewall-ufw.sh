@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Restrict host ingress to admin SSH and Cloudflare HTTP(S); safe to rerun for range refreshes.
+# Keep key-only SSH reachable and restrict HTTP(S) to Cloudflare; safe to rerun for range refreshes.
 set -euo pipefail
 
-ADMIN_IPS="${ADMIN_IPS:?space-separated admin IPv4/IPv6 CIDRs}"
 TAG=wa-managed
 [ "$(id -u)" -eq 0 ] || { echo "run as root" >&2; exit 1; }
 
@@ -15,9 +14,8 @@ n4="$(grep -c . "$work/v4")"; n6="$(grep -c . "$work/v6")"
 
 command -v ufw >/dev/null || { apt-get update -qq; apt-get install -y -qq ufw >/dev/null; }
 
-# Add replacement rules before removing obsolete or broad rules.
-for ip in $ADMIN_IPS; do ufw allow proto tcp from "$ip" to any port 22 comment "$TAG ssh-admin" >/dev/null; done
-for ip in ${EXTRA_SSH_IPS:-}; do ufw allow proto tcp from "$ip" to any port 22 comment "$TAG ssh-extra" >/dev/null; done
+# Nizan's public IP is dynamic. SSH remains public but key-only, with fail2ban.
+ufw allow 22/tcp comment "$TAG ssh-key-only" >/dev/null
 while read -r cidr; do
   [ -n "$cidr" ] && ufw allow proto tcp from "$cidr" to any port 80,443 comment "$TAG web-cf" >/dev/null
 done < <(cat "$work/v4" "$work/v6")
@@ -26,7 +24,7 @@ keep="$(cat "$work/v4" "$work/v6")"
 mapfile -t delete_numbers < <(ufw status numbered | while IFS= read -r line; do
   number="$(sed -nE 's/^\[ *([0-9]+)\].*/\1/p' <<<"$line")"
   [ -n "$number" ] || continue
-  if grep -Eq '(22|80|443|80,443)(/tcp)?( \(v6\))? +ALLOW IN +Anywhere|(OpenSSH|Nginx [A-Za-z]+)( \(v6\))? +ALLOW IN +Anywhere' <<<"$line"; then
+  if grep -Eq '(80|443|80,443)(/tcp)?( \(v6\))? +ALLOW IN +Anywhere|(Nginx [A-Za-z]+)( \(v6\))? +ALLOW IN +Anywhere' <<<"$line"; then
     echo "$number"; continue
   fi
   if grep -q "$TAG web-cf" <<<"$line"; then
