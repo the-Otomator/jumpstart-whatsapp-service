@@ -10,7 +10,7 @@ command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 
 rules="$(mktemp)"
 trap 'rm -f "$rules"' EXIT
-cf="$( (curl -fsS --max-time 20 https://www.cloudflare.com/ips-v4; curl -fsS --max-time 20 https://www.cloudflare.com/ips-v6) | grep . | jq -R . | jq -s .)"
+cf="$( (curl -fsS --max-time 20 https://www.cloudflare.com/ips-v4; echo; curl -fsS --max-time 20 https://www.cloudflare.com/ips-v6; echo) | grep . | jq -R . | jq -s .)"
 [ "$(jq length <<<"$cf")" -ge 15 ] || { echo "Cloudflare range list failed sanity check" >&2; exit 1; }
 jq -n --argjson cf "$cf" '[
   {direction:"in",protocol:"tcp",port:"22",source_ips:["0.0.0.0/0","::/0"],description:"ssh key-only plus fail2ban"},

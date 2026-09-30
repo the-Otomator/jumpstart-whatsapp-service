@@ -18,9 +18,9 @@ command -v ufw >/dev/null || { apt-get update -qq; apt-get install -y -qq ufw >/
 ufw allow 22/tcp comment "$TAG ssh-key-only" >/dev/null
 while read -r cidr; do
   [ -n "$cidr" ] && ufw allow proto tcp from "$cidr" to any port 80,443 comment "$TAG web-cf" >/dev/null
-done < <(cat "$work/v4" "$work/v6")
+done < <(sed -e '$a\' "$work/v4" "$work/v6")
 
-keep="$(cat "$work/v4" "$work/v6")"
+keep="$(sed -e '$a\' "$work/v4" "$work/v6")"
 mapfile -t delete_numbers < <(ufw status numbered | while IFS= read -r line; do
   number="$(sed -nE 's/^\[ *([0-9]+)\].*/\1/p' <<<"$line")"
   [ -n "$number" ] || continue

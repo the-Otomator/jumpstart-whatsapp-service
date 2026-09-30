@@ -51,6 +51,10 @@ bantime = 1h
 CONF
 systemctl enable --now fail2ban
 systemctl restart fail2ban
+for _ in {1..20}; do
+  fail2ban-client ping >/dev/null 2>&1 && break
+  sleep 0.25
+done
 cat > /etc/apt/apt.conf.d/20auto-upgrades <<'CONF'
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
