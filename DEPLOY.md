@@ -120,7 +120,7 @@ Certbot auto-renews. Test renewal:
 sudo certbot renew --dry-run
 ```
 
-The production host uses nginx with a Cloudflare Origin Certificate and Cloudflare SSL/TLS mode **Full (strict)** instead of Certbot. Port 3001 stays bound to `127.0.0.1`; only nginx accepts public web traffic.
+The production host uses nginx for TLS. Its current certificate is self-signed; replace it with a Cloudflare Origin CA certificate before changing Cloudflare SSL/TLS mode to **Full (strict)**. Port 3001 stays bound to `127.0.0.1`; only nginx accepts public web traffic.
 
 ## Production security and backups
 
