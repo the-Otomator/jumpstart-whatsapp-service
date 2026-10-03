@@ -1,0 +1,87 @@
+# release-window — production merge gate (COWORK-EXEC-CONTRACT v2)
+# Posts commit status "release-window" on every open PR to PROD_BRANCH:
+#   success  → nightly 23:00–06:00 OR weekend Thu 23:00–Sun 08:00 Asia/Jerusalem,
+#              OR label `off-window-approved`, OR docs/agent-rules-only PR
+#   pending  → otherwise (outside both release windows)
+# Branch protection makes "release-window" a required status, so a pending PR cannot be merged.
+# Re-evaluated hourly so PRs open at window-start and close at the applicable window-end.
+# Only Nizan adds the `off-window-approved` label. Agents never add it, never edit this file to weaken it.
+name: release-window
+
+on:
+  # Execute the BASE branch's YAML, never the PR's proposed gate rules.
+  # PR metadata/files are read via API only; no PR code is checked out or executed.
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review, edited]
+  schedule:
+    - cron: '5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: release-window-${{ github.event.pull_request.number || 'sweep' }}
+  cancel-in-progress: false
+
+env:
+  PROD_BRANCH: master   # ← per repo: the branch whose merge deploys to production
+  EXEMPT_RE: '^(docs/|_task_tmp/|_state/|_handout/|\.cursor/|[^/]+\.md$)'
+
+jobs:
+  gate:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    timeout-minutes: 50
+    steps:
+      - name: Evaluate release window
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          : "${GH_TOKEN:?Workflow GITHUB_TOKEN missing}"
+          il_hour() { h=$(TZ=Asia/Jerusalem date +%H); echo $((10#$h)); }
+          il_dow() { TZ=Asia/Jerusalem date +%u; }
+          in_weekend_window() {
+            local h d; h=$(il_hour); d=$(il_dow)
+            [ "$d" -eq 4 ] && [ "$h" -ge 23 ] && return 0
+            { [ "$d" -eq 5 ] || [ "$d" -eq 6 ]; } && return 0
+            [ "$d" -eq 7 ] && [ "$h" -lt 8 ] && return 0
+            return 1
+          }
+          in_window() {
+            local h; h=$(il_hour)
+            { [ "$h" -ge 23 ] || [ "$h" -lt 6 ]; } && return 0
+            in_weekend_window
+          }
+          evaluate() {
+            local n="$1" pr base sha labels files nondoc st d
+            pr=$(gh api "repos/$REPO/pulls/$n")
+            base=$(jq -r .base.ref <<<"$pr"); sha=$(jq -r .head.sha <<<"$pr")
+            labels=$(jq -r '[.labels[].name] | join(",")' <<<"$pr")
+            files=$(gh api --paginate "repos/$REPO/pulls/$n/files?per_page=100" --jq '.[].filename')
+            nondoc=$(printf '%s\n' "$files" | grep -Ev "$EXEMPT_RE" || true)
+            if [ "$base" != "$PROD_BRANCH" ]; then st=success; d="Not a production branch"
+            elif [ -z "$nondoc" ]; then st=success; d="Docs/agent-rules only"
+            elif [[ ",$labels," == *",off-window-approved,"* ]]; then st=success; d="Off-window approved (label)"
+            elif in_window; then st=success; d="Inside release window: nightly 23-06 / Thu 23-Sun 08 IL"
+            else st=pending; d="Windows: nightly 23-06 / Thu 23-Sun 08 IL; or off-window-approved"; fi
+            gh api -X POST "repos/$REPO/statuses/$sha" -f state="$st" -f context=release-window -f description="$d" -f target_url="$RUN_URL" >/dev/null
+            echo "PR #$n $sha -> $st ($d)"
+          }
+          if [ "$EVENT" = "pull_request_target" ]; then
+            evaluate "$PR_NUMBER"
+          else
+            for n in $(gh api --paginate "repos/$REPO/pulls?state=open&base=$PROD_BRANCH&per_page=100" --jq '.[].number'); do
+              evaluate "$n"
+            done
+          fi
