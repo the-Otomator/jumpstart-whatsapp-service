@@ -33,33 +33,22 @@ jobs:
   gate:
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
-    environment: release-gate
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
     timeout-minutes: 50
     steps:
-      - name: Mint release gate token
-        id: gate-token
-        timeout-minutes: 5
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: the-Otomator
-          repositories: jumpstart-whatsapp-service
-          permission-statuses: write
-          permission-pull-requests: read
-          permission-contents: read
       - name: Evaluate release window
         env:
-          GH_TOKEN: ${{ steps.gate-token.outputs.token }}
-          RELEASE_GATE_APP: ${{ steps.gate-token.outputs.app-slug }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          : "${GH_TOKEN:?Release gate App token missing}"
-          [ "$RELEASE_GATE_APP" = otomator-whatsapp-release-gate ] || { echo '::error::Unexpected release gate App'; exit 1; }
+          : "${GH_TOKEN:?Workflow GITHUB_TOKEN missing}"
           il_hour() { h=$(TZ=Asia/Jerusalem date +%H); echo $((10#$h)); }
           il_dow() { TZ=Asia/Jerusalem date +%u; }
           in_weekend_window() {

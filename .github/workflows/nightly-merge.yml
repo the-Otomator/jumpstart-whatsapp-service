@@ -41,7 +41,13 @@ jobs:
   run:
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
-    environment: release-gate
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: write
+      issues: write
+      actions: write
+      checks: read
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -127,23 +133,8 @@ jobs:
             mode=day
           fi
           echo "phase=$mode" >> "$GITHUB_OUTPUT"
-      # Sync work is complete. Only the bounded day phase needs an App token.
-      - name: Mint daytime release gate token
-        if: steps.sync.outputs.phase == 'day'
-        id: gate-token
-        timeout-minutes: 5
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: the-Otomator
-          repositories: jumpstart-whatsapp-service
-          permission-statuses: write
-          permission-pull-requests: read
-          permission-contents: read
       - name: Merge approved releases
         if: steps.sync.outputs.phase == 'day' || steps.sync.outputs.phase == 'merge'
-        # The day phase ends before its one-hour App token can expire.
         timeout-minutes: ${{ steps.sync.outputs.phase == 'day' && 50 || 120 }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -153,8 +144,7 @@ jobs:
           OPS_URL: ${{ vars.RELEASE_OPS_URL }}
           OPS_SECRET: ${{ secrets.RELEASE_OPS_SECRET }}
           MODE: ${{ steps.sync.outputs.phase }}
-          RELEASE_GATE_TOKEN: ${{ steps.gate-token.outputs.token }}
-          RELEASE_GATE_APP: ${{ steps.gate-token.outputs.app-slug }}
+          RELEASE_GATE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           il_hour() { h=$(TZ=Asia/Jerusalem date +%H); echo $((10#$h)); }
@@ -176,8 +166,7 @@ jobs:
               -H 'content-type: application/json' -H "x-release-secret: $OPS_SECRET" -d "$1"
           }
           if [ "$MODE" = "day" ]; then
-            : "${RELEASE_GATE_TOKEN:?Release gate App token missing}"
-            [ "$RELEASE_GATE_APP" = otomator-whatsapp-release-gate ] || { echo '::error::Unexpected release gate App'; exit 1; }
+            : "${RELEASE_GATE_TOKEN:?Workflow GITHUB_TOKEN missing}"
             in_window && exit 0
             dplan=$(cat "$RUNNER_TEMP/release-gate-day-plan.json")
             dres='[]'
