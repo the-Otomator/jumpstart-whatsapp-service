@@ -4,7 +4,7 @@
  */
 import fs from 'fs'
 import path from 'path'
-import { useHardenedMultiFileAuthState } from './hardenedMultiFileAuthState'
+import { flushAllAuthWrites, useHardenedMultiFileAuthState } from './hardenedMultiFileAuthState'
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg)
@@ -57,6 +57,16 @@ async function main() {
     assert(again && typeof again === 'object', 'creds still valid after mixed key/creds writes')
     assert(fs.existsSync(path.join(folder, 'pre-key-1.json')), 'pre-key-1 written')
     assert(fs.existsSync(path.join(folder, 'pre-key-2.json')), 'pre-key-2 written')
+
+    // Baileys does not await event listeners. Shutdown must drain these writes
+    // even when the caller has not retained their promises.
+    ;(state.creds as { accountSyncCounter: number }).accountSyncCounter = 99
+    void saveCreds()
+    void state.keys.set({ 'pre-key': { '3': state.creds.noiseKey } })
+    await flushAllAuthWrites()
+    const afterShutdownFlush = JSON.parse(fs.readFileSync(credsPath, 'utf-8'))
+    assert(afterShutdownFlush.accountSyncCounter === 99, 'global shutdown flush persisted creds')
+    assert(fs.existsSync(path.join(folder, 'pre-key-3.json')), 'global shutdown flush persisted keys')
 
     console.log('hardenedMultiFileAuthState.test.ts: OK')
   } finally {
