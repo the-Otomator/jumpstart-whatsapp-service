@@ -95,7 +95,7 @@ jobs:
           if [ "$EVENT" = "schedule" ] && [ "$SCHEDULE" = "15 20,21 * * *" ]; then
             if [ "$(il_hour)" -eq 23 ]; then mode=merge; else echo "Not 23:xx IL (DST twin cron) — skip."; exit 0; fi
           fi
-          if [ "$EVENT" = "schedule" ] && [ "$SCHEDULE" = "5,35 * * * *" ] && in_window && in_weekend_window; then
+          if [ "$EVENT" = "schedule" ] && [ "$SCHEDULE" = "5,35 * * * *" ] && in_window; then
             mode=merge
           fi
 
@@ -206,6 +206,7 @@ jobs:
           plan=$(ops "$(jq -nc --arg repo "$REPO" '{action:"plan",repo:$repo}')")
           # Keep the admin's existing max_per_night setting as a cap per window run.
           paused=$(jq -r '.paused // false' <<<"$plan"); max=$(jq -r '.max_per_night // 5' <<<"$plan")
+          [ "$(jq '.approved // [] | length' <<<"$plan")" -gt 0 ] || exit 0
           results='[]'
           add() { results=$(jq -c --argjson n "$1" --arg sha "$2" --arg o "$3" --arg r "$4" --arg m "${5:-}" \
                    '. + [{number:$n,approved_sha:$sha,outcome:$o,reason:($r|gsub("[\\r\\n|]+";" ")),merge_sha:$m}]' <<<"$results"); echo "PR #$1: $3 — $4"; }
