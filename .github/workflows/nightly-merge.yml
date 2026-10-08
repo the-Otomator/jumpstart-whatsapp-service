@@ -105,7 +105,8 @@ jobs:
                  --jq '[.[] | {number,title,author:.author.login,url,head_sha:.headRefOid,draft:.isDraft,
                         labels:[.labels[].name],merge_state:.mergeStateStatus,updated_at:.updatedAt,body:(.body // ""),
                         release_manual:((.body // "") | test("(?im)^\\s*Release:\\s*manual\\b"))}]')
-          ops "$(jq -nc --arg repo "$REPO" --arg b "$PROD_BRANCH" --arg u "$RUN_URL" --argjson prs "$prs" '{action:"sync",repo:$repo,base:$b,run_url:$u,prs:$prs}')" >/dev/null
+          sync_result=$(ops "$(jq -nc --arg repo "$REPO" --arg b "$PROD_BRANCH" --arg u "$RUN_URL" --argjson prs "$prs" '{action:"sync",repo:$repo,base:$b,run_url:$u,prs:$prs}')")
+          node .github/scripts/reconcile-release-prs.mjs "$sync_result"
           echo "Synced $(jq length <<<"$prs") open PR(s)."
           while IFS= read -r item; do
             [ -n "$item" ] || continue
