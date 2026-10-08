@@ -1,0 +1,69 @@
+name: task-link
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review, closed]
+  schedule:
+    - cron: '12 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: task-link-${{ github.event.pull_request.number || 'sweep' }}
+  cancel-in-progress: false
+env:
+  PROD_BRANCH: master
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    environment: task-link-gate
+    timeout-minutes: 30
+    steps:
+      # No checkout and no PR code execution. Status identity is the trusted App everywhere.
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        id: app
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-statuses: write
+          permission-pull-requests: read
+      - uses: actions/github-script@v7
+        env:
+          OPS_URL: ${{ vars.RELEASE_OPS_URL }}
+          OPS_SECRET: ${{ secrets.RELEASE_OPS_SECRET }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        with:
+          github-token: ${{ steps.app.outputs.token }}
+          script: |
+            if (process.env.APP_SLUG !== 'otomator-release-gate') throw new Error('Unexpected gate App');
+            const repo = `${context.repo.owner}/${context.repo.repo}`;
+            const target = base => base === process.env.PROD_BRANCH || base.startsWith('feature/');
+            const call = async (body) => {
+              if (!process.env.OPS_URL || !process.env.OPS_SECRET) throw new Error('Release ops configuration missing');
+              const r = await fetch(process.env.OPS_URL, {method:'POST', headers:{'Content-Type':'application/json','x-release-secret':process.env.OPS_SECRET}, body:JSON.stringify({repo,...body}), signal:AbortSignal.timeout(90000)});
+              const data = await r.json();
+              if (!r.ok || !data.ok) throw new Error('Task link verification unavailable');
+              return data;
+            };
+            let numbers;
+            if (context.payload.pull_request) {
+              if (!target(context.payload.pull_request.base.ref)) return;
+              numbers = [context.payload.pull_request.number];
+            } else {
+              const open = await github.paginate(github.rest.pulls.list, {...context.repo,state:'open',per_page:100});
+              numbers = open.filter(pr => target(pr.base.ref)).map(pr => pr.number);
+              try { numbers.push(...(await call({action:'task_link_numbers'})).numbers); }
+              catch { core.setFailed('Stored PR outcome sweep unavailable'); }
+              numbers = [...new Set(numbers)];
+            }
+            for (const number of numbers) {
+              try {
+                const {data:pr} = await github.rest.pulls.get({...context.repo,pull_number:number});
+                if (pr.state === 'open' && target(pr.base.ref)) {
+                  await github.rest.repos.createCommitStatus({...context.repo,sha:pr.head.sha,context:'task-link',state:'failure',description:'Link a task in admin → Night releases',target_url:'https://admin.otomator.pro/releases'});
+                }
+                await call({action:'task_link',number});
+              } catch { core.setFailed(`PR #${number}: task link verification failed; no success claimed`); }
+            }
