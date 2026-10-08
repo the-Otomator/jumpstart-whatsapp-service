@@ -121,6 +121,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
+      signal: req.signal,
     })
 
     if (!res.ok) {

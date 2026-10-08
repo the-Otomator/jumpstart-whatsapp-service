@@ -5,6 +5,7 @@ import { postWebhook } from '../lib/webhookDispatcher'
 import { sendWhatsAppMessageDirect } from '../lib/sendDirect'
 import { WA_ENQUEUE_CEILING_MS, WA_SEND_TIMEOUT_MS, withTimeout } from '../lib/withTimeout'
 import { getProviderForOrg } from '../providers'
+import { isOfficialOtp, OTP_SEND_BUDGET_MS } from '../lib/officialOtp'
 import type { SendMessageRequest } from '../types'
 import { estimateCapacity } from './capacityPlanner'
 import {
@@ -82,6 +83,7 @@ export class SenderPool {
   }
 
   enqueueAndWait(req: SendMessageRequest, lane: MessageLane = req.lane ?? 'operational'): Promise<string> {
+    if (isOfficialOtp(req) && lane === 'operational') return this.sendOfficialOtp(req)
     return new Promise((resolve, reject) => {
       let settled = false
       const settleResolve = (id: string) => {
@@ -123,6 +125,39 @@ export class SenderPool {
 
       this.scheduleProcess()
     })
+  }
+
+  private async sendOfficialOtp(req: SendMessageRequest): Promise<string> {
+    const started = Date.now()
+    const provider = getProviderForOrg(this.orgId)
+    const session = provider?.getStatus(this.orgId)
+    if (provider?.type !== 'meta-cloud' || session?.status !== 'connected') {
+      orgLogger(this.orgId).error({ code: 'OTP_SESSION_UNAVAILABLE', elapsedMs: Date.now() - started }, 'Official OTP Meta session unavailable')
+      throw new Error('Official OTP Meta session not connected')
+    }
+    // A restored Meta session has no socket reconnect event. Reconcile only
+    // this dedicated authentication sender, never another tenant's pool.
+    if (this.state.paused) {
+      orgLogger(this.orgId).warn({ pauseReason: this.state.pauseReason }, 'Recovering official OTP pool from stale pause')
+      this.resume()
+    }
+    const controller = new AbortController()
+    try {
+      const result = await withTimeout(
+        sendWhatsAppMessageDirect({ ...req, signal: controller.signal }),
+        OTP_SEND_BUDGET_MS,
+        'send_timeout'
+      )
+      this.onSendSuccess('operational')
+      orgLogger(this.orgId).info({ elapsedMs: Date.now() - started, messageId: result }, 'Official OTP provider accepted')
+      return result
+    } catch (err) {
+      this.onSendFailure((err as Error).message)
+      orgLogger(this.orgId).error({ elapsedMs: Date.now() - started, code: 'OTP_SEND_FAILED' }, 'Official OTP operational send failed')
+      throw err
+    } finally {
+      controller.abort()
+    }
   }
 
   enqueue(req: SendMessageRequest, lane: MessageLane = 'marketing'): string {
