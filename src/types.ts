@@ -23,6 +23,8 @@ export type MessageType =
   | 'template'
 
 export interface TemplateComponent {
+  sub_type?: 'url' | 'quick_reply'
+  index?: string
   type: 'header' | 'body' | 'button'
   parameters: TemplateParameter[]
 }
