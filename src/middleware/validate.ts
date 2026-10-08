@@ -67,6 +67,8 @@ export const sendMessageSchema = z.object({
     language: z.string().min(2),
     components: z.array(z.object({
       type: z.enum(['header', 'body', 'button']),
+      sub_type: z.enum(['url', 'quick_reply']).optional(),
+      index: z.string().regex(/^\d$/).optional(),
       parameters: z.array(z.object({
         type: z.enum(['text', 'image', 'document', 'video']),
         text: z.string().optional(),
