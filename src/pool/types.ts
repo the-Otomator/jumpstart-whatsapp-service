@@ -86,6 +86,7 @@ export interface CapacityEstimateResponse {
 }
 
 export interface PoolStatusResponse {
+  officialOtpInFlight: number
   orgId: string
   phoneNumber?: string
   paused: boolean

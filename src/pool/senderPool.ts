@@ -4,7 +4,8 @@ import { loadSessionMeta } from '../lib/sessionStore'
 import { postWebhook } from '../lib/webhookDispatcher'
 import { sendWhatsAppMessageDirect } from '../lib/sendDirect'
 import { WA_ENQUEUE_CEILING_MS, WA_SEND_TIMEOUT_MS, withTimeout } from '../lib/withTimeout'
-import { getProviderForOrg } from '../providers'
+import { getProviderForOrg, getMetaCloudProvider } from '../providers'
+import { isOfficialOtp, OTP_SEND_BUDGET_MS } from '../lib/officialOtp'
 import type { SendMessageRequest } from '../types'
 import { estimateCapacity } from './capacityPlanner'
 import {
@@ -48,6 +49,7 @@ export class SenderPool {
   private marketingQueue: QueuedJob[] = []
   private processing = false
   private processorTimer: ReturnType<typeof setTimeout> | null = null
+  private officialOtpInFlight = 0
 
   constructor(orgId: string) {
     this.orgId = orgId
@@ -63,6 +65,7 @@ export class SenderPool {
       orgId: this.orgId,
       phoneNumber: this.state.phoneNumber,
       paused: this.state.paused,
+      officialOtpInFlight: this.officialOtpInFlight,
       pauseReason: this.state.pauseReason,
       warmupStage: this.state.warmupStage,
       dailyCap,
@@ -82,6 +85,7 @@ export class SenderPool {
   }
 
   enqueueAndWait(req: SendMessageRequest, lane: MessageLane = req.lane ?? 'operational'): Promise<string> {
+    if (isOfficialOtp(req) && lane === 'operational') return this.sendOfficialOtp(req)
     return new Promise((resolve, reject) => {
       let settled = false
       const settleResolve = (id: string) => {
@@ -123,6 +127,39 @@ export class SenderPool {
 
       this.scheduleProcess()
     })
+  }
+
+  private async sendOfficialOtp(req: SendMessageRequest): Promise<string> {
+    const started = Date.now()
+    const controller = new AbortController()
+    this.officialOtpInFlight++
+    try {
+      const result = await withTimeout(
+        (async () => {
+          const provider = getMetaCloudProvider()
+          await provider.recoverOfficialOtpSession(controller.signal)
+          if (provider.getStatus(this.orgId)?.status !== 'connected') throw new Error('Official OTP Meta session not connected')
+          if (this.state.paused) {
+            orgLogger(this.orgId).warn({ pauseReason: this.state.pauseReason }, 'Recovering official OTP pool from stale pause')
+            this.resume()
+          }
+          // Call the Meta provider explicitly: never select another provider.
+          return (await provider.sendMessage({ ...req, signal: controller.signal })).messageId
+        })(),
+        OTP_SEND_BUDGET_MS,
+        'send_timeout'
+      )
+      this.onSendSuccess('operational')
+      orgLogger(this.orgId).info({ elapsedMs: Date.now() - started, messageId: result }, 'Official OTP provider accepted')
+      return result
+    } catch (err) {
+      this.onSendFailure((err as Error).message)
+      orgLogger(this.orgId).error({ elapsedMs: Date.now() - started, code: 'OTP_SEND_FAILED' }, 'Official OTP operational send failed')
+      throw err
+    } finally {
+      this.officialOtpInFlight--
+      controller.abort()
+    }
   }
 
   enqueue(req: SendMessageRequest, lane: MessageLane = 'marketing'): string {

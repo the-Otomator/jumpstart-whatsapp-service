@@ -39,6 +39,8 @@ export interface TemplateParameter {
 export type MessageLane = 'operational' | 'marketing'
 
 export interface SendMessageRequest {
+  /** Internal cancellation; never accepted from JSON request bodies. */
+  signal?: AbortSignal
   orgId: string
   to: string // phone number with country code, e.g. "972501234567"
   type: MessageType
