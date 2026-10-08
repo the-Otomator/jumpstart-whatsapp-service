@@ -4,7 +4,7 @@ import { postWebhook } from '../../lib/webhookDispatcher'
 import { saveSessionMeta, loadSessionMeta, deleteSessionMeta, listStoredSessions, updateSessionMeta } from '../../lib/sessionStore'
 import { logger, orgLogger } from '../../lib/logger'
 import { jumpstartSupabase } from '../../lib/jumpstartSupabase'
-import { OFFICIAL_OTP_SESSION } from '../../lib/officialOtp'
+import { OFFICIAL_OTP_SESSION, isOfficialOtp } from '../../lib/officialOtp'
 import {
   requireWebhookUrl,
   WEBHOOK_URL_REQUIRED,
@@ -163,11 +163,12 @@ export class MetaCloudProvider implements WhatsAppProvider {
 
     if (!res.ok) {
       const body = await res.text()
-      throw new Error(`Meta Cloud API send failed: ${res.status} ${body}`)
+      throw new Error(isOfficialOtp(req) ? `Official OTP Meta send failed: ${res.status}` : `Meta Cloud API send failed: ${res.status} ${body}`)
     }
 
     const result = await res.json() as { messages?: Array<{ id: string }> }
     const messageId = result.messages?.[0]?.id ?? ''
+    if (isOfficialOtp(req) && !messageId) throw new Error('Official OTP Meta response missing message ID')
 
     return { messageId }
   }

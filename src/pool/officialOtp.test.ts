@@ -30,7 +30,10 @@ async function main() {
       req.signal?.addEventListener('abort', () => { aborted = true; reject(new Error('aborted')) })
     })
     const start = Date.now()
-    await assert.rejects(pool.enqueueAndWait(request), /send_timeout/)
+    const stalled = pool.enqueueAndWait(request)
+    assert.equal(pool.getStatus().officialOtpInFlight, 1)
+    await assert.rejects(stalled, /send_timeout/)
+    assert.equal(pool.getStatus().officialOtpInFlight, 0)
     assert.ok(Date.now() - start < OTP_SEND_BUDGET_MS + 400, 'hung provider must settle below 3s')
     assert.equal(aborted, true)
     provider.sendMessage = async () => { throw new Error('Meta template unavailable') }

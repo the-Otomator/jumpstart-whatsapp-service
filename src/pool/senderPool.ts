@@ -49,6 +49,7 @@ export class SenderPool {
   private marketingQueue: QueuedJob[] = []
   private processing = false
   private processorTimer: ReturnType<typeof setTimeout> | null = null
+  private officialOtpInFlight = 0
 
   constructor(orgId: string) {
     this.orgId = orgId
@@ -64,6 +65,7 @@ export class SenderPool {
       orgId: this.orgId,
       phoneNumber: this.state.phoneNumber,
       paused: this.state.paused,
+      officialOtpInFlight: this.officialOtpInFlight,
       pauseReason: this.state.pauseReason,
       warmupStage: this.state.warmupStage,
       dailyCap,
@@ -130,6 +132,7 @@ export class SenderPool {
   private async sendOfficialOtp(req: SendMessageRequest): Promise<string> {
     const started = Date.now()
     const controller = new AbortController()
+    this.officialOtpInFlight++
     try {
       const result = await withTimeout(
         (async () => {
@@ -154,6 +157,7 @@ export class SenderPool {
       orgLogger(this.orgId).error({ elapsedMs: Date.now() - started, code: 'OTP_SEND_FAILED' }, 'Official OTP operational send failed')
       throw err
     } finally {
+      this.officialOtpInFlight--
       controller.abort()
     }
   }
