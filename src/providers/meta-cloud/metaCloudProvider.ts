@@ -3,6 +3,8 @@ import type { Session, SendMessageRequest } from '../../types'
 import { postWebhook } from '../../lib/webhookDispatcher'
 import { saveSessionMeta, loadSessionMeta, deleteSessionMeta, listStoredSessions, updateSessionMeta } from '../../lib/sessionStore'
 import { logger, orgLogger } from '../../lib/logger'
+import { jumpstartSupabase } from '../../lib/jumpstartSupabase'
+import { OFFICIAL_OTP_SESSION } from '../../lib/officialOtp'
 import {
   requireWebhookUrl,
   WEBHOOK_URL_REQUIRED,
@@ -24,6 +26,41 @@ export class MetaCloudProvider implements WhatsAppProvider {
 
   private sessions = new Map<string, Session>()
   private configs = new Map<string, MetaCloudConfig>()
+
+  /** Recover only the pinned platform sender from its existing registry secret. */
+  async recoverOfficialOtpSession(signal: AbortSignal): Promise<void> {
+    if (this.sessions.get(OFFICIAL_OTP_SESSION)?.status === 'connected' && this.configs.has(OFFICIAL_OTP_SESSION)) return
+    if (!jumpstartSupabase) throw new Error('Official OTP registry unavailable')
+    const accountId = '1f63d665-b065-49c7-ad04-92427cfb7265'
+    const { data: account, error: accountError } = await jumpstartSupabase.from('wa_meta_accounts')
+      .select('id, phone_number_id, waba_id, display_phone_number')
+      .eq('id', accountId).eq('status', 'connected').eq('token_health', 'healthy')
+      .is('sending_paused_at', null).abortSignal(signal).maybeSingle()
+    if (accountError || !account?.phone_number_id || String(account.display_phone_number).replace(/\D/g, '') !== '972555040363') {
+      throw new Error('Official OTP account unavailable')
+    }
+    const { data: secret, error: secretError } = await jumpstartSupabase.from('wa_meta_secrets')
+      .select('access_token').eq('account_id', accountId).abortSignal(signal).maybeSingle()
+    if (secretError || !secret?.access_token) throw new Error('Official OTP registry token unavailable')
+    const webhookUrl = requireWebhookUrl(await resolveSessionWebhookUrl(OFFICIAL_OTP_SESSION))
+    signal.throwIfAborted()
+    const response = await fetch(`${GRAPH_API_BASE}/${account.phone_number_id}`, {
+      headers: { Authorization: `Bearer ${secret.access_token}` }, signal,
+    })
+    if (!response.ok) throw new Error(`Official OTP Meta validation failed: ${response.status}`)
+    const info = await response.json() as { display_phone_number?: string }
+    if (info.display_phone_number?.replace(/\D/g, '') !== '972555040363') throw new Error('Official OTP sender mismatch')
+    signal.throwIfAborted()
+    this.configs.set(OFFICIAL_OTP_SESSION, { accessToken: secret.access_token,
+      phoneNumberId: account.phone_number_id, wabaId: account.waba_id, webhookUrl })
+    this.sessions.set(OFFICIAL_OTP_SESSION, { orgId: OFFICIAL_OTP_SESSION, provider: 'meta-cloud',
+      status: 'connected', phoneNumber: '972555040363', webhookUrl })
+    saveSessionMeta({ orgId: OFFICIAL_OTP_SESSION, provider: 'meta-cloud', autoRestore: true,
+      webhookUrl, createdAt: new Date().toISOString(), lastConnected: new Date().toISOString(),
+      phoneNumber: '972555040363', metaPhoneNumberId: account.phone_number_id,
+      metaWabaId: account.waba_id, metaAccessToken: secret.access_token })
+    orgLogger(OFFICIAL_OTP_SESSION).info('Recovered official OTP Meta session from registry')
+  }
 
   async start(orgId: string, webhookUrl?: string, config?: Partial<MetaCloudConfig>): Promise<void> {
     const log = orgLogger(orgId)

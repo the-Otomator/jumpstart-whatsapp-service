@@ -9,6 +9,8 @@ async function main() {
   const provider = getMetaCloudProvider()
   const originalStatus = provider.getStatus.bind(provider)
   const originalSend = provider.sendMessage.bind(provider)
+  const originalRecover = provider.recoverOfficialOtpSession.bind(provider)
+  provider.recoverOfficialOtpSession = async () => {}
   const folder = path.join(process.cwd(), 'sessions', OFFICIAL_OTP_SESSION)
   assert.equal(fs.existsSync(folder), false, 'fixture must not replace existing session data')
   provider.getStatus = id => id === OFFICIAL_OTP_SESSION
@@ -39,6 +41,7 @@ async function main() {
   } finally {
     provider.getStatus = originalStatus
     provider.sendMessage = originalSend
+    provider.recoverOfficialOtpSession = originalRecover
     fs.rmSync(folder, { recursive: true, force: true })
   }
 }

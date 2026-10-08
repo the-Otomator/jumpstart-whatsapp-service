@@ -4,7 +4,7 @@ import { loadSessionMeta } from '../lib/sessionStore'
 import { postWebhook } from '../lib/webhookDispatcher'
 import { sendWhatsAppMessageDirect } from '../lib/sendDirect'
 import { WA_ENQUEUE_CEILING_MS, WA_SEND_TIMEOUT_MS, withTimeout } from '../lib/withTimeout'
-import { getProviderForOrg } from '../providers'
+import { getProviderForOrg, getMetaCloudProvider } from '../providers'
 import { isOfficialOtp, OTP_SEND_BUDGET_MS } from '../lib/officialOtp'
 import type { SendMessageRequest } from '../types'
 import { estimateCapacity } from './capacityPlanner'
@@ -129,22 +129,20 @@ export class SenderPool {
 
   private async sendOfficialOtp(req: SendMessageRequest): Promise<string> {
     const started = Date.now()
-    const provider = getProviderForOrg(this.orgId)
-    const session = provider?.getStatus(this.orgId)
-    if (provider?.type !== 'meta-cloud' || session?.status !== 'connected') {
-      orgLogger(this.orgId).error({ code: 'OTP_SESSION_UNAVAILABLE', elapsedMs: Date.now() - started }, 'Official OTP Meta session unavailable')
-      throw new Error('Official OTP Meta session not connected')
-    }
-    // A restored Meta session has no socket reconnect event. Reconcile only
-    // this dedicated authentication sender, never another tenant's pool.
-    if (this.state.paused) {
-      orgLogger(this.orgId).warn({ pauseReason: this.state.pauseReason }, 'Recovering official OTP pool from stale pause')
-      this.resume()
-    }
     const controller = new AbortController()
     try {
       const result = await withTimeout(
-        sendWhatsAppMessageDirect({ ...req, signal: controller.signal }),
+        (async () => {
+          const provider = getMetaCloudProvider()
+          await provider.recoverOfficialOtpSession(controller.signal)
+          if (provider.getStatus(this.orgId)?.status !== 'connected') throw new Error('Official OTP Meta session not connected')
+          if (this.state.paused) {
+            orgLogger(this.orgId).warn({ pauseReason: this.state.pauseReason }, 'Recovering official OTP pool from stale pause')
+            this.resume()
+          }
+          // Call the Meta provider explicitly: never select another provider.
+          return (await provider.sendMessage({ ...req, signal: controller.signal })).messageId
+        })(),
         OTP_SEND_BUDGET_MS,
         'send_timeout'
       )
