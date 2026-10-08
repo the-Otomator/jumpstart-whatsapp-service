@@ -42,7 +42,16 @@ export class MetaCloudProvider implements WhatsAppProvider {
     const { data: secret, error: secretError } = await jumpstartSupabase.from('wa_meta_secrets')
       .select('access_token').eq('account_id', accountId).abortSignal(signal).maybeSingle()
     if (secretError || !secret?.access_token) throw new Error('Official OTP registry token unavailable')
-    const webhookUrl = requireWebhookUrl(await resolveSessionWebhookUrl(OFFICIAL_OTP_SESSION))
+    // This platform Meta sender is registered in JumpStart wa_devices, not
+    // the legacy Hub whatsapp_devices registry used by tenant sockets.
+    const { data: device, error: deviceError } = await jumpstartSupabase.from('wa_devices')
+      .select('session_key').eq('session_key', OFFICIAL_OTP_SESSION)
+      .eq('wa_meta_account_id', accountId).eq('provider', 'meta-cloud')
+      .abortSignal(signal).maybeSingle()
+    if (deviceError || !device || !process.env.WA_INCOMING_SECRET) throw new Error('Official OTP webhook routing unavailable')
+    const webhookUrl = requireWebhookUrl(await resolveSessionWebhookUrl(OFFICIAL_OTP_SESSION, {
+      deviceWebhookUrl: 'https://dgxnnwnugdxzeopleera.supabase.co/functions/v1/wa-webhook',
+    }))
     signal.throwIfAborted()
     const response = await fetch(`${GRAPH_API_BASE}/${account.phone_number_id}`, {
       headers: { Authorization: `Bearer ${secret.access_token}` }, signal,

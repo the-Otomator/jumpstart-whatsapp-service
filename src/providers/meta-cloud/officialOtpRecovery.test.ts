@@ -13,6 +13,8 @@ async function main() {
   const previousRegistry = registry.jumpstartSupabase
   const previousWebhook = webhooks.resolveSessionWebhookUrl
   const previousFetch = globalThis.fetch
+  const previousIncomingSecret = process.env.WA_INCOMING_SECRET
+  process.env.WA_INCOMING_SECRET = 'fixture-incoming'
   const filters: Array<[string, unknown]> = []
   let display = '+972 55-504-0363'
   let secretReads = 0
@@ -24,7 +26,7 @@ async function main() {
       maybeSingle: async () => { if (table === 'wa_meta_secrets') secretReads++;
         return { error: null, data: table === 'wa_meta_accounts'
           ? { phone_number_id: 'fixture-phone', waba_id: 'fixture-waba', display_phone_number: display }
-          : { access_token: 'fixture-token' } } },
+          : table === 'wa_devices' ? { session_key: OFFICIAL_OTP_SESSION } : { access_token: 'fixture-token' } } },
     }
     return query
   } }
@@ -50,6 +52,8 @@ async function main() {
     ;(registry as any).jumpstartSupabase = previousRegistry
     ;(webhooks as any).resolveSessionWebhookUrl = previousWebhook
     globalThis.fetch = previousFetch
+    if (previousIncomingSecret === undefined) delete process.env.WA_INCOMING_SECRET
+    else process.env.WA_INCOMING_SECRET = previousIncomingSecret
     fs.rmSync(folder, { recursive: true, force: true })
   }
 }
