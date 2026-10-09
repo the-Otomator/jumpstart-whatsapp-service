@@ -1,6 +1,7 @@
 import { Server } from 'http'
 import { logger } from './logger'
 import { listActiveSessions, stopSession } from '../sessionManager'
+import { flushAllAuthWrites } from './hardenedMultiFileAuthState'
 
 let isShuttingDown = false
 
@@ -38,11 +39,25 @@ export function setupGracefulShutdown(
       }
     }
 
-    // 3. Give a moment for cleanup, then exit
-    setTimeout(() => {
-      logger.info('Shutdown complete')
-      process.exit(0)
-    }, 2000)
+    // Baileys emits creds.update without awaiting its listener. Draining the
+    // per-folder queues is necessary before process.exit can discard writes.
+    const capMs = 10_000
+    let cap: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        flushAllAuthWrites(),
+        new Promise<never>((_, reject) => {
+          cap = setTimeout(() => reject(new Error('auth flush timed out')), capMs)
+        }),
+      ])
+      logger.info('Auth writes flushed before shutdown')
+    } catch (err) {
+      logger.error({ err }, 'Auth writes did not flush before shutdown deadline')
+    } finally {
+      if (cap) clearTimeout(cap)
+    }
+    logger.info('Shutdown complete')
+    process.exit(0)
   }
 
   process.on('SIGTERM', () => shutdown('SIGTERM'))
