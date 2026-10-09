@@ -3,3 +3,14 @@ dist/
 .env
 sessions/
 *.log
+
+# Local task scratch and generated handoffs
+_state/
+_tasks/
+_handout/
+_answers/
+_task_tmp/
+.worktrees/
+.tmp_*
+_build_out.txt
+Claude outputs/
