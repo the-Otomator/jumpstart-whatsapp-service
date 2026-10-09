@@ -50,3 +50,11 @@ Write review comments in English, short, with the concrete fix.
 - Never connect to the server, never SSH, never touch `sessions/` or session auth state, never send real WhatsApp messages.
 - All `/api` routes require the Bearer auth middleware; validate request bodies with Zod.
 - Never log message contents, phone numbers in full, or tokens (see logger redaction).
+
+## Required PR task link
+Every PR body must start with `Task: <JumpStart task link>` taken from its task file.
+Use `https://hub.jumpstart.co.il/tasks/table?task=<task-uuid>` or `Task: jumpstart-task <task-uuid>`.
+The task must exist, be non-archived, and belong to the JumpStart project in the Otomator organization.
+A PR without a valid structured link is expected to fail the required `task-link` gate.
+Fix a missing link in otomator-admin → Night releases by picking an existing task or creating one from the PR.
+Do not forge statuses, change required checks, bypass protection, or create production tasks without authorization.

@@ -94,3 +94,11 @@ src/
 - Session auth state persisted in `sessions/<orgId>/` (gitignored)
 - Never commit `.env` or `sessions/` directory
 - Incoming WhatsApp messages forwarded to org's webhookUrl
+
+## Required PR task link
+Every PR body must start with `Task: <JumpStart task link>` taken from its task file.
+Use `https://hub.jumpstart.co.il/tasks/table?task=<task-uuid>` or `Task: jumpstart-task <task-uuid>`.
+The task must exist, be non-archived, and belong to the JumpStart project in the Otomator organization.
+A PR without a valid structured link is expected to fail the required `task-link` gate.
+Fix a missing link in otomator-admin → Night releases by picking an existing task or creating one from the PR.
+Do not forge statuses, change required checks, bypass protection, or create production tasks without authorization.
