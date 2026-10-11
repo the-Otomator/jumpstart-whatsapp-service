@@ -74,7 +74,7 @@ async function fetchDeviceRows(sessionKeys: string[]): Promise<WaDeviceRow[]> {
 async function runHeartbeatTick(): Promise<void> {
   if (!jumpstartSupabase) return
 
-  const live = listActiveSessions()
+  const live = listActiveSessions().filter((s) => s.provider === 'baileys')
   const updates = buildHeartbeatUpdates(live, (key) => isSocketOpen(getBaileysSocket(key)))
 
   try {
@@ -113,7 +113,7 @@ async function runHeartbeatTick(): Promise<void> {
 async function processOutageAlerts(liveKeys: string[]): Promise<void> {
   if (!jumpstartSupabase) return
   const now = Date.now()
-  const live = listActiveSessions()
+  const live = listActiveSessions().filter((s) => s.provider === 'baileys')
   const liveByKey = new Map(live.map((s) => [s.orgId, s]))
 
   // Track non-connected duration for live sessions only.

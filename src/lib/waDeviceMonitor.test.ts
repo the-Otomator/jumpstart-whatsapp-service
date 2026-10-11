@@ -175,3 +175,23 @@ testReconcile()
 testReconcileMissingWebhookError()
 testHeartbeatPayload()
 console.log('waDeviceMonitor.test.ts: all passed')
+
+// Official Meta sessions have no Baileys socket and must never be written
+// disconnected (or falsely refreshed healthy) by the Web-session heartbeat.
+const metaSessions: Session[] = ['connected', 'disconnected', 'connecting'].map(
+  (status) => ({ orgId: 'meta-' + status, provider: 'meta-cloud', status } as Session)
+)
+let metaSocketChecks = 0
+assert.deepStrictEqual(buildHeartbeatUpdates(metaSessions, () => {
+  metaSocketChecks += 1
+  return false
+}), [])
+assert.strictEqual(metaSocketChecks, 0)
+const mixed = buildHeartbeatUpdates([
+  ...metaSessions,
+  { orgId: 'web-closed', provider: 'baileys', status: 'connected' },
+], () => false)
+assert.strictEqual(mixed.length, 1)
+assert.strictEqual(mixed[0].session_key, 'web-closed')
+assert.strictEqual(mixed[0].status, 'disconnected')
+console.log('Meta heartbeat regression: passed')
