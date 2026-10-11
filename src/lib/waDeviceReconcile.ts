@@ -138,7 +138,8 @@ export function buildHeartbeatUpdates(
   live: Session[],
   isOpen: (sessionKey: string) => boolean
 ): HeartbeatUpdate[] {
-  return live.map((s) => {
+  // Meta Cloud health belongs to the Meta account lifecycle, not a Web socket.
+  return live.filter((s) => s.provider === 'baileys').map((s) => {
     const open = isOpen(s.orgId)
     const status =
       s.status === 'connected' && open
