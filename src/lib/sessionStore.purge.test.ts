@@ -2,7 +2,7 @@ import assert from 'assert'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { deleteSessionAuthDir, listStoredSessions, saveSessionMeta } from './sessionStore'
+import { deleteSessionAuthDir, listStoredSessions, saveSessionMeta, hasStoredLoginIdentity } from './sessionStore'
 
 const originalCwd = process.cwd()
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-session-purge-'))
@@ -17,6 +17,9 @@ try {
   })
   const authDir = path.join(testRoot, 'sessions', sessionKey)
   fs.writeFileSync(path.join(authDir, 'creds.json'), '{"registered":true}', 'utf8')
+  assert.equal(hasStoredLoginIdentity(sessionKey), false, 'registered alone does not establish a login identity')
+  fs.writeFileSync(path.join(authDir, 'creds.json'), JSON.stringify({ registered: false, me: { id: '972500000000:1@s.whatsapp.net' } }))
+  assert.equal(hasStoredLoginIdentity(sessionKey), true, 'Baileys v7 reuses me.id even when registered is false')
 
   assert.ok(listStoredSessions().includes(sessionKey), 'fixture must be restart-restorable')
   deleteSessionAuthDir(sessionKey)

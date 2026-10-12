@@ -33,6 +33,10 @@ export function getStatus(orgId: string): Session | undefined {
   return provider?.getStatus(orgId)
 }
 
+export async function recoverDisconnectedSessions(): Promise<void> {
+  await (getProvider('baileys') as BaileysProvider).recoverDisconnectedSessions()
+}
+
 export function getQR(orgId: string): string | undefined {
   const provider = getProviderForOrg(orgId)
   return provider?.getQR(orgId)

@@ -26,9 +26,9 @@ import {
   saveSessionMeta,
   loadSessionMeta,
   updateSessionMeta,
-  deleteSessionMeta,
   deleteSessionAuthDir,
   listStoredSessions,
+  hasStoredLoginIdentity,
   migrateSessionAuthDir,
 } from '../../lib/sessionStore'
 import { WA_SEND_TIMEOUT_MS, withTimeout } from '../../lib/withTimeout'
@@ -324,6 +324,7 @@ export class BaileysProvider implements WhatsAppProvider {
           log.info('Reconnecting in 5 seconds...')
           this.scheduleReconnect(orgId, session.webhookUrl, RECONNECT_DELAY_MS)
         } else {
+          updateSessionMeta(orgId, { autoRestore: false })
           log.info('Logged out — not reconnecting')
         }
       }
@@ -583,8 +584,9 @@ export class BaileysProvider implements WhatsAppProvider {
       deleteSessionAuthDir(orgId)
       log.info('Session stopped — all pairing data removed from disk')
     } else if (!keepAuth) {
-      deleteSessionMeta(orgId)
-      log.info('Session stopped and metadata removed')
+      // Persist the opt-out: the socket close can clear the in-memory stop flag.
+      saveSessionMeta({ orgId, provider: 'baileys', createdAt: new Date().toISOString(), autoRestore: false })
+      log.info('Session stopped — automatic restore disabled')
     } else {
       log.info('Session stopped (auth files kept for migrate)')
     }
@@ -677,6 +679,30 @@ export class BaileysProvider implements WhatsAppProvider {
 
   listActiveSessions(): Session[] {
     return Array.from(this.sessions.values())
+  }
+
+  /** Recover lost sessions without replacing healthy sockets or QR pairing flows. */
+  async recoverDisconnectedSessions(): Promise<void> {
+    for (const orgId of listStoredSessions()) {
+      const eligible = () => {
+        const meta = loadSessionMeta(orgId)
+        const session = this.sessions.get(orgId)
+        return meta?.provider !== 'meta-cloud' && meta?.autoRestore !== false &&
+          !this.intentionallyStoppedOrgIds.has(orgId) &&
+          !this.sockets.has(orgId) && !this.reconnectTimers.has(orgId) &&
+          (!session || session.status === 'disconnected') && hasStoredLoginIdentity(orgId)
+      }
+      if (!eligible()) continue
+      try {
+        const webhookUrl = await resolveSessionWebhookUrl(orgId)
+        // A manual connect/stop may have happened while resolving the registry.
+        if (!webhookUrl || !eligible()) continue
+        orgLogger(orgId).info('Periodic recovery: reconnecting registered session')
+        await this.start(orgId, webhookUrl)
+      } catch (err) {
+        orgLogger(orgId).warn({ err }, 'Periodic session recovery failed; retry next interval')
+      }
+    }
   }
 
   async restoreSessions(): Promise<void> {
