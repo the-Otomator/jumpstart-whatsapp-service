@@ -20,7 +20,8 @@ import metaWebhooksRouter from './routes/webhooks'
 import templatesRouter from './routes/templates'
 import botRoutes from './routes/bot'
 import mediaRoutes from './routes/media'
-import { listActiveSessions, restoreSessions } from './sessionManager'
+import { listActiveSessions, restoreSessions, recoverDisconnectedSessions } from './sessionManager'
+import { createSessionRecoveryScheduler } from './lib/sessionRecoveryScheduler'
 import { logger } from './lib/logger'
 import { requestIdMiddleware } from './middleware/requestId'
 import { setupGracefulShutdown } from './lib/shutdown'
@@ -312,6 +313,8 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 })
 
 // Start server
+const sessionRecovery = createSessionRecoveryScheduler(recoverDisconnectedSessions,
+  (err) => logger.error({ err }, 'Periodic session recovery pass failed'))
 const server = app.listen(PORT, async () => {
   logger.info({ port: PORT }, 'WhatsApp service started')
 
@@ -323,6 +326,7 @@ const server = app.listen(PORT, async () => {
   }
 
   startWaDeviceMonitor()
+  sessionRecovery.start()
   startMediaPruneScheduler()
   startWebhookAudit()
 })
@@ -330,6 +334,7 @@ const server = app.listen(PORT, async () => {
 // Graceful shutdown
 setupGracefulShutdown(server, {
   onShutdown: () => {
+    sessionRecovery.stop()
     stopWaDeviceMonitor()
     stopMediaPruneScheduler()
     stopWebhookAudit()
