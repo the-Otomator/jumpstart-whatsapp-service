@@ -28,7 +28,7 @@ import {
   updateSessionMeta,
   deleteSessionAuthDir,
   listStoredSessions,
-  hasRegisteredSession,
+  hasStoredLoginIdentity,
   migrateSessionAuthDir,
 } from '../../lib/sessionStore'
 import { WA_SEND_TIMEOUT_MS, withTimeout } from '../../lib/withTimeout'
@@ -690,7 +690,7 @@ export class BaileysProvider implements WhatsAppProvider {
         return meta?.provider !== 'meta-cloud' && meta?.autoRestore !== false &&
           !this.intentionallyStoppedOrgIds.has(orgId) &&
           !this.sockets.has(orgId) && !this.reconnectTimers.has(orgId) &&
-          (!session || session.status === 'disconnected') && hasRegisteredSession(orgId)
+          (!session || session.status === 'disconnected') && hasStoredLoginIdentity(orgId)
       }
       if (!eligible()) continue
       try {

@@ -25,7 +25,7 @@ async function main() {
   const store = require('./sessionStore')
   const webhook = require('./sessionWebhookUrl')
   const original = { list: store.listStoredSessions, meta: store.loadSessionMeta,
-    registered: store.hasRegisteredSession, webhook: webhook.resolveSessionWebhookUrl }
+    registered: store.hasStoredLoginIdentity, webhook: webhook.resolveSessionWebhookUrl }
   const provider = getProvider('baileys') as any
   const originalStart = provider.start
   let starts = 0
@@ -34,7 +34,7 @@ async function main() {
   const key = 'test-periodic-recovery'
   store.listStoredSessions = () => [key]
   store.loadSessionMeta = () => meta
-  store.hasRegisteredSession = () => registered
+  store.hasStoredLoginIdentity = () => registered
   webhook.resolveSessionWebhookUrl = async () => 'https://example.test/webhook'
   provider.start = async () => { starts++ }
   try {
@@ -77,7 +77,7 @@ async function main() {
     provider.start = originalStart
     store.listStoredSessions = original.list
     store.loadSessionMeta = original.meta
-    store.hasRegisteredSession = original.registered
+    store.hasStoredLoginIdentity = original.registered
     webhook.resolveSessionWebhookUrl = original.webhook
   }
   console.log('Periodic recovery: scheduler overlap, failure recovery and session safety checks passed')

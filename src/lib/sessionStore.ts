@@ -20,10 +20,12 @@ export interface SessionMeta {
 const SESSIONS_DIR = (): string => path.join(process.cwd(), 'sessions')
 
 /** Read only the pairing flag; never log WhatsApp credential material. */
-export function hasRegisteredSession(orgId: string): boolean {
+export function hasStoredLoginIdentity(orgId: string): boolean {
   try {
     const credentials = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR(), orgId, 'creds.json'), 'utf-8'))
-    return credentials.registered === true
+    // Baileys v7 selects login versus pairing using creds.me, not registered.
+    // Live connected sessions can legitimately retain registered=false.
+    return typeof credentials.me?.id === 'string' && credentials.me.id.length > 0
   } catch {
     return false
   }
