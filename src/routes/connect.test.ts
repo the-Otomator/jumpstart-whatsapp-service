@@ -7,6 +7,7 @@ import path from 'path'
 import connectRouter, { mintConnectToken } from './connect'
 import * as sessionManager from '../sessionManager'
 import * as supabase from '../lib/supabase'
+import * as jumpstart from '../lib/jumpstartSupabase'
 
 type StartCall = { orgId: string; webhookUrl?: string }
 
@@ -17,6 +18,8 @@ async function main(): Promise<void> {
   const originalStopSession = sessionManager.stopSession
   const originalValidateOrg = supabase.validateOrg
   const originalConnectTokenSecret = process.env.CONNECT_TOKEN_SECRET
+  const originalJumpstart = jumpstart.jumpstartSupabase
+  const originalJumpstartUrl = process.env.JUMPSTART_SUPABASE_URL
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-connect-route-'))
   const startCalls: StartCall[] = []
   const stopCalls: string[] = []
@@ -27,6 +30,7 @@ async function main(): Promise<void> {
 
   try {
     process.env.CONNECT_TOKEN_SECRET = 'connect-route-test-secret-at-least-32-chars'
+    process.env.JUMPSTART_SUPABASE_URL = 'https://dgxnnwnugdxzeopleera.supabase.co'
     process.chdir(tmp)
     ;(sessionManager as any).getStatus = (orgId: string) => statuses.get(orgId)
     ;(sessionManager as any).startSession = async (orgId: string, webhookUrl?: string) => {
@@ -116,6 +120,44 @@ async function main(): Promise<void> {
     const burstResponse = await fetch(pollingUrl)
     assert.strictEqual(burstResponse.status, 429, 'sixth immediate status poll must be rate limited')
 
+    // Exact legacy session shape used by Lior: no Hub URL and no disk metadata.
+    // All providers and registry rows here are fixtures, never the live account.
+    const legacyKey = '32f936f4-aa16-4b44-b153-2a44f0e23cf0'
+    const fixtureRow = { id: '6e84c4f2-5f6c-4066-9ae6-cfaa3336894f', organization_id: legacyKey, status: 'disconnected', webhook_secret: null, listen_only: true }
+    let registryRows: unknown = [fixtureRow]
+    let registryError: unknown = null
+    Object.defineProperty(jumpstart, 'jumpstartSupabase', { configurable: true, value: {
+      from: () => ({ select: () => ({ eq: (_column: string, key: string) => {
+        assert.strictEqual(key, legacyKey, 'lookup uses the exact legacy session key')
+        return { limit: async () => ({ data: registryRows, error: registryError }) }
+      } }) }),
+    } })
+    statuses.set(legacyKey, { orgId: legacyKey, status: 'disconnected' })
+    const beforeLegacy = startCalls.length
+    const legacyPage = await fetch(connectUrl(legacyKey))
+    assert.strictEqual(legacyPage.status, 200)
+    assert.deepStrictEqual(startCalls[beforeLegacy], { orgId: legacyKey, webhookUrl: 'https://dgxnnwnugdxzeopleera.supabase.co/functions/v1/wa-webhook' })
+    assert.deepStrictEqual(stopCalls, [], 'reconnect never purges credentials')
+    statuses.set(legacyKey, { orgId: legacyKey, status: 'qr', qr: 'fixture-qr-only' })
+    const qrState = await fetch(connectUrl(legacyKey, '/status'))
+    assert.deepStrictEqual(await qrState.json(), { status: 'qr', qr: 'fixture-qr-only' })
+    await fetch(connectUrl(legacyKey))
+    assert.strictEqual(startCalls.length, beforeLegacy + 1, 'refresh while QR is active does not restart pairing')
+    statuses.set(legacyKey, { orgId: legacyKey, status: 'connected', phoneNumber: '972500000000' })
+    const connectedState = await fetch(connectUrl(legacyKey, '/status'))
+    assert.deepStrictEqual(await connectedState.json(), { status: 'connected', phoneNumber: '972500000000' })
+    await fetch(connectUrl(legacyKey))
+    assert.strictEqual(startCalls.length, beforeLegacy + 1, 'connected session is not restarted')
+    statuses.set(legacyKey, { orgId: legacyKey, status: 'disconnected' })
+    for (const rows of [[], [fixtureRow, fixtureRow], [{ ...fixtureRow, status: 'revoked' }]]) {
+      registryRows = rows
+      assert.strictEqual((await fetch(connectUrl(legacyKey))).status, 503)
+    }
+    registryRows = [fixtureRow]; registryError = { message: 'fixture registry unavailable' }
+    assert.strictEqual((await fetch(connectUrl(legacyKey))).status, 503)
+    assert.strictEqual(startCalls.length, beforeLegacy + 1, 'missing/ambiguous/revoked/unavailable routing never starts a session')
+    assert.strictEqual((await fetch(`${baseUrl}/${legacyKey}?t=invalid`)).status, 401)
+
     console.log('connect.test.ts: registry priority, disk fallback, and fail-closed checks passed')
   } finally {
     if (server) await new Promise<void>((resolve) => server!.close(() => resolve()))
@@ -124,6 +166,9 @@ async function main(): Promise<void> {
     ;(sessionManager as any).startSession = originalStartSession
     ;(sessionManager as any).stopSession = originalStopSession
     ;(supabase as any).validateOrg = originalValidateOrg
+    Object.defineProperty(jumpstart, 'jumpstartSupabase', { configurable: true, value: originalJumpstart })
+    if (originalJumpstartUrl === undefined) delete process.env.JUMPSTART_SUPABASE_URL
+    else process.env.JUMPSTART_SUPABASE_URL = originalJumpstartUrl
     if (originalConnectTokenSecret === undefined) delete process.env.CONNECT_TOKEN_SECRET
     else process.env.CONNECT_TOKEN_SECRET = originalConnectTokenSecret
     fs.rmSync(tmp, { recursive: true, force: true })
