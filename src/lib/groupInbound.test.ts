@@ -61,3 +61,5 @@ function main(): void {
 }
 
 main()
+
+assert.equal(resolveInboundPhone({ fromMe: true, remoteJid: '972500000001@s.whatsapp.net', senderPn: '972500000099@s.whatsapp.net' }, false), '972500000001', 'phone reply belongs to remote conversation, not device owner');

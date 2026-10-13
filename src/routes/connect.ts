@@ -140,10 +140,17 @@ router.get('/:orgId', async (req: Request, res: Response) => {
   const status = getStatus(orgId)
   if (!status || status.status === 'disconnected') {
     const prevStatus = status?.status ?? 'none'
-    const webhookUrl = await resolveSessionWebhookUrl(orgId, {
-      deviceWebhookUrl: orgCheck.deviceWebhookUrl,
-      deviceWebhookSecret: orgCheck.deviceWebhookSecret,
-    })
+    let webhookUrl: string | undefined
+    try {
+      webhookUrl = await resolveSessionWebhookUrl(orgId, {
+        deviceWebhookUrl: orgCheck.deviceWebhookUrl,
+        deviceWebhookSecret: orgCheck.deviceWebhookSecret,
+      })
+    } catch {
+      log.error({ code: 'WEBHOOK_DEVICE_LOOKUP_FAILED', prevStatus }, 'Cannot verify connect webhook routing')
+      res.status(503).send(renderErrorPage(orgId, 'לא ניתן לאמת את הגדרות החיבור. נסו שוב מאוחר יותר.', { variant: 'unavailable' }))
+      return
+    }
     if (!webhookUrl) {
       log.error(
         { code: WEBHOOK_URL_REQUIRED, prevStatus },

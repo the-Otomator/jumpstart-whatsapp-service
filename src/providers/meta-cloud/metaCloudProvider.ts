@@ -1,3 +1,4 @@
+import { assertDeviceCanSend } from '../../lib/deviceSendPolicy'
 import type { WhatsAppProvider, SendResult, ProviderType } from '../types'
 import type { Session, SendMessageRequest } from '../../types'
 import { postWebhook } from '../../lib/webhookDispatcher'
@@ -158,6 +159,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
     const config = this.configs.get(req.orgId)
     if (!config) throw new Error(`Session ${req.orgId} not connected (meta-cloud)`)
 
+    await assertDeviceCanSend(req.orgId)
     const payload = this.buildPayload(req)
 
     const res = await fetch(`${GRAPH_API_BASE}/${config.phoneNumberId}/messages`, {

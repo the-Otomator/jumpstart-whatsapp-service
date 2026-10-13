@@ -3,6 +3,7 @@
  * Run: npx ts-node --transpile-only src/providers/baileys/baileysProvider.wsOpen.test.ts
  */
 import { EventEmitter } from 'events'
+import * as jumpstart from '../../lib/jumpstartSupabase'
 import { getProvider } from '../../providers'
 import { isSocketOpen, type BaileysProvider } from './baileysProvider'
 
@@ -40,6 +41,7 @@ function makeFakeSocket(ws: FakeWs = { isOpen: true }): FakeSock {
 }
 
 async function main() {
+  Object.defineProperty(jumpstart, 'jumpstartSupabase', { configurable: true, value: { from: () => ({ select: () => ({ eq: () => ({ limit: async () => ({ data: [{ id: 'fixture', listen_only: false }], error: null }) }) }) }) } })
   // --- isSocketOpen shapes (Baileys WebSocketClient / raw / legacy) ---
   assert(
     isSocketOpen(makeFakeSocket({ isOpen: true }) as never) === true,

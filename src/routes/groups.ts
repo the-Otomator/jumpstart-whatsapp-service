@@ -1,4 +1,5 @@
 ﻿import { Router, Request, Response } from 'express'
+import { assertDeviceCanSend } from '../lib/deviceSendPolicy'
 import { getBaileysSocket, getStatus } from '../sessionManager'
 import {
   validateBody,
@@ -38,6 +39,17 @@ import type {
 } from '../types'
 
 const router = Router()
+// Group mutations can emit WhatsApp system messages as well as text.
+router.use(async (req, res, next) => {
+  if (req.method === 'GET') return next()
+  const sessionKey = req.path.split('/').filter(Boolean)[0]
+  if (!sessionKey) { res.status(400).json({ error: 'session_required' }); return }
+  try { await assertDeviceCanSend(sessionKey); next() }
+  catch (error) {
+    const code = (error as Error).message
+    res.status(code === 'WA_DEVICE_LISTEN_ONLY' ? 403 : 503).json({ error: code, code })
+  }
+})
 
 const PARTICIPATING_CACHE_TTL_MS = 6 * 60 * 60 * 1000
 const participatingCache = new Map<string, { expiresAt: number; data: ParticipatingGroup[] }>()
@@ -295,6 +307,7 @@ router.post(
         content = { text: text ?? '' }
       }
 
+      await assertDeviceCanSend(orgId)
       const result = await sock.sendMessage(groupJid, content)
       log.info({ groupJid, messageId: result?.key?.id }, 'Message sent to group')
       res.json({ success: true, messageId: result?.key?.id ?? '' })

@@ -10,10 +10,13 @@ import { orgLogger } from '../lib/logger'
 import { getSenderPool } from '../pool'
 import { assertSafeOutboundUrl } from '../lib/webhookDispatcher'
 
+import { assertDeviceCanSend } from '../lib/deviceSendPolicy'
+
 const router = Router()
 
 /** Shared by `POST /api/messages/send` and `POST /api/sessions/:orgId/send`. */
 export async function sendWhatsAppMessage(req: SendMessageRequest): Promise<string> {
+  await assertDeviceCanSend(req.orgId)
   if (req.mediaUrl) assertSafeOutboundUrl(req.mediaUrl)
   const lane = req.lane ?? 'operational'
   const pool = getSenderPool(req.orgId)
@@ -46,6 +49,7 @@ router.post('/send', validateBody(sendMessageSchema), async (req: Request, res: 
   const lane = body.lane ?? 'operational'
 
   try {
+    await assertDeviceCanSend(body.orgId)
     if (body.enqueue && lane === 'marketing') {
       const pool = getSenderPool(body.orgId)
       const jobId = pool.enqueue(body, 'marketing')
@@ -60,8 +64,8 @@ router.post('/send', validateBody(sendMessageSchema), async (req: Request, res: 
   } catch (err) {
     const msg = (err as Error).message
     const isTimeout = msg === 'send_timeout' || msg.includes('send_timeout')
-    const status = msg.includes('not connected') ? 404 : 500
-    const code = msg.includes('not connected')
+    const status = msg === 'WA_DEVICE_LISTEN_ONLY' ? 403 : msg === 'WA_DEVICE_POLICY_UNAVAILABLE' ? 503 : msg.includes('not connected') ? 404 : 500
+    const code = msg.startsWith('WA_DEVICE_') ? msg : msg.includes('not connected')
       ? 'SESSION_NOT_CONNECTED'
       : isTimeout
         ? 'SEND_TIMEOUT'
@@ -88,6 +92,7 @@ router.post('/send-bulk', validateBody(sendBulkSchema), async (req: Request, res
     const lane = msg.lane ?? 'marketing'
 
     try {
+      await assertDeviceCanSend(msg.orgId)
       if (msg.enqueue && lane === 'marketing') {
         const pool = getSenderPool(msg.orgId)
         const jobId = pool.enqueue(msg, 'marketing')
