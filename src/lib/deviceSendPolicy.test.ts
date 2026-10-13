@@ -1,13 +1,52 @@
 import assert from 'node:assert/strict'
 import express from 'express'
 import * as jumpstart from './jumpstartSupabase'
-import { assertDeviceCanSend } from './deviceSendPolicy'
+import { assertDeviceCanSend, readDeviceListenOnly } from './deviceSendPolicy'
 import { getProvider } from '../providers'
 import messages from '../routes/messages'
 import groups from '../routes/groups'
 import sessions from '../routes/sessions'
 
 async function main() {
+  const registryRow = { org_id: '9d54c7ab-f12b-46a5-801b-64dc5286ed81', webhook_url: 'https://uvfrlkpeuejzqvvmnxrb.supabase.co/functions/v1/wa-incoming' }
+  let externalRows: unknown = [registryRow]
+  let externalError: unknown = null
+  let belongsToJumpstart = false
+  let jumpstartError: unknown = null
+  let organizationError: unknown = null
+  const registryClient = { from: () => ({ select: () => ({ eq: () => ({ limit: async () => ({ data: externalRows, error: externalError }) }) }) }) }
+  const externalPolicyClient = { from: (table: string) => ({ select: () => ({ eq: () => ({ limit: async () => ({
+    data: table === 'wa_devices' ? [] : belongsToJumpstart ? [{ id: registryRow.org_id }] : [],
+    error: table === 'wa_devices' ? jumpstartError : organizationError,
+  }) }) }) }) }
+  assert.equal(await readDeviceListenOnly('external-fixture', externalPolicyClient, registryClient), false)
+  const jumpstartObservedClient = { from: () => ({ select: () => ({ eq: () => ({ limit: async () => ({ data: [{ id: 'observed', listen_only: true }], error: null }) }) }) }) }
+  assert.equal(await readDeviceListenOnly('external-fixture', jumpstartObservedClient, registryClient), true, 'JumpStart listen-only wins even when Hub claims an external route')
+  for (const webhook_url of [
+    'https://dgxnnwnugdxzeopleera.supabase.co/functions/v1/wa-incoming',
+    'https://api.jumpstart.co.il/functions/v1/wa-webhook',
+    'https://uvfrlkpeuejzqvvmnxrb.supabase.co/functions/v1/wa-webhook',
+    'http://uvfrlkpeuejzqvvmnxrb.supabase.co/functions/v1/wa-incoming',
+    'https://evil.invalid/functions/v1/wa-incoming', 'not-a-url',
+  ]) {
+    externalRows = [{ ...registryRow, webhook_url }]
+    await assert.rejects(readDeviceListenOnly('external-fixture', externalPolicyClient, registryClient), /WA_DEVICE_POLICY_UNAVAILABLE/)
+  }
+  for (const invalid of [[], [registryRow, registryRow], [{ ...registryRow, org_id: null }]]) {
+    externalRows = invalid
+    await assert.rejects(readDeviceListenOnly('external-fixture', externalPolicyClient, registryClient), /WA_DEVICE_POLICY_UNAVAILABLE/)
+  }
+  externalRows = [registryRow]; belongsToJumpstart = true
+  await assert.rejects(readDeviceListenOnly('external-fixture', externalPolicyClient, registryClient), /WA_DEVICE_POLICY_UNAVAILABLE/)
+  belongsToJumpstart = false; externalError = 'unavailable'
+  await assert.rejects(readDeviceListenOnly('external-fixture', externalPolicyClient, registryClient), /WA_DEVICE_POLICY_UNAVAILABLE/)
+  externalError = null; jumpstartError = 'unavailable'
+  await assert.rejects(readDeviceListenOnly('external-fixture', externalPolicyClient, registryClient), /WA_DEVICE_POLICY_UNAVAILABLE/)
+  jumpstartError = null; organizationError = 'unavailable'
+  await assert.rejects(readDeviceListenOnly('external-fixture', externalPolicyClient, registryClient), /WA_DEVICE_POLICY_UNAVAILABLE/)
+  organizationError = null
+  await assert.rejects(readDeviceListenOnly('external-fixture', externalPolicyClient, null), /WA_DEVICE_POLICY_UNAVAILABLE/)
+  console.log('PASS external policy: exact Hub registry, external route, no JumpStart ownership; all ambiguity and lookup failures refuse')
   let listenOnly = true
   let rows: unknown = undefined
   let error: unknown = null
