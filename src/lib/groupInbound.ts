@@ -126,8 +126,7 @@ export function resolveInboundPhone(key: ExtendedMessageKey, isGroup: boolean): 
   return isGroup
     ? pickPnDigits(key.participantPn, key.participantAlt, key.participant)
     : pickPnDigits(
-        key.senderPn,
-        key.remoteJidAlt,
+        ...(key.fromMe ? [key.remoteJidAlt, key.remoteJid] : [key.senderPn, key.remoteJidAlt]),
         key.remoteJid?.endsWith('@s.whatsapp.net') ? key.remoteJid : undefined,
       )
 }

@@ -1,9 +1,11 @@
+import { assertDeviceCanSend, readDeviceListenOnly } from '../../lib/deviceSendPolicy'
 import makeWASocket, {
   DisconnectReason,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
   proto,
   AnyMessageContent,
+  type WAMessage,
 } from '@whiskeysockets/baileys'
 import {
   cacheInboundMedia,
@@ -330,8 +332,11 @@ export class BaileysProvider implements WhatsAppProvider {
       }
     })
 
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      if (type !== 'notify') return
+    const captureMessages = async (messages: WAMessage[], history = false) => {
+      let listenOnly: boolean
+      try { listenOnly = await readDeviceListenOnly(orgId) }
+      catch (error) { log.error({ err: (error as Error).message }, 'Device observation policy unavailable'); return }
+      if (history && !listenOnly) return
 
       for (const msg of messages) {
         // Inbound decrypt failure ("Waiting for this message") surfaces as CIPHERTEXT stub.
@@ -344,9 +349,10 @@ export class BaileysProvider implements WhatsAppProvider {
           continue
         }
 
-        if (!msg.message || msg.key.fromMe) continue
+        if (!msg.message || (msg.key.fromMe && !listenOnly)) continue
 
         const from = msg.key.remoteJid ?? ''
+        if (!from || from.endsWith('@broadcast') || from.endsWith('@newsletter')) continue
         const keyAny = msg.key as ExtendedMessageKey
         const { isGroup, groupJid, ambiguous } = resolveGroupInbound(keyAny)
 
@@ -414,16 +420,19 @@ export class BaileysProvider implements WhatsAppProvider {
           orgId,
           messageId: msg.key.id ?? '',
           from: senderPhone,
-          fromName: msg.pushName ?? '',
+          fromName: msg.key.fromMe ? '' : (msg.pushName ?? ''),
+          fromMe: msg.key.fromMe === true,
+          observed: listenOnly,
+          history,
           message: textContent,
           timestamp: messageTimestampSec,
           isGroup,
           isLid,
           senderPn: isGroup ? (participantPn ?? senderPn) : senderPn,
-          isBackfill: backfill.isBackfill,
+          isBackfill: history || backfill.isBackfill,
           // When true, Hub must persist but must not enqueue for auto-task pipeline.
-          skipDownstream: backfill.isBackfill,
-          backfillReason: backfill.reason,
+          skipDownstream: listenOnly || backfill.isBackfill,
+          backfillReason: history ? 'history_sync' : backfill.reason,
         }
 
         if (backfill.isBackfill) {
@@ -499,6 +508,12 @@ export class BaileysProvider implements WhatsAppProvider {
 
         if (session.webhookUrl) await postWebhook(session.webhookUrl, payload)
       }
+    }
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      if (type === 'notify' || type === 'append') await captureMessages(messages, type === 'append')
+    })
+    sock.ev.on('messaging-history.set', async ({ messages }) => {
+      await captureMessages(messages, true)
     })
 
     sock.ev.on('messages.update', async (updates) => {
@@ -616,6 +631,7 @@ export class BaileysProvider implements WhatsAppProvider {
 
     const jid = formatJid(req.to)
     const content = await buildMessageContent(req)
+    await assertDeviceCanSend(req.orgId)
     const result = await withTimeout(
       sock.sendMessage(jid, content) as Promise<
         | { key?: { id?: string | null; remoteJid?: string | null }; message?: proto.IMessage | null }

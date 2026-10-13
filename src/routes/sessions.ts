@@ -254,8 +254,8 @@ router.post(
     } catch (err) {
       const msg = (err as Error).message
       const isTimeout = msg === 'send_timeout' || msg.includes('send_timeout')
-      const status = msg.includes('not connected') ? 404 : 500
-      const code = msg.includes('not connected')
+      const status = msg === 'WA_DEVICE_LISTEN_ONLY' ? 403 : msg === 'WA_DEVICE_POLICY_UNAVAILABLE' ? 503 : msg.includes('not connected') ? 404 : 500
+      const code = msg.startsWith('WA_DEVICE_') ? msg : msg.includes('not connected')
         ? 'SESSION_NOT_CONNECTED'
         : isTimeout
           ? 'SEND_TIMEOUT'

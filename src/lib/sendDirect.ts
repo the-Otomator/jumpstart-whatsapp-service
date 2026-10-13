@@ -1,3 +1,4 @@
+import { assertDeviceCanSend } from './deviceSendPolicy'
 import { getProviderForOrg } from '../providers'
 import type { SendMessageRequest } from '../types'
 
@@ -11,6 +12,7 @@ export async function sendWhatsAppMessageDirect(req: SendMessageRequest): Promis
     throw new Error(`Session ${req.orgId} not connected`)
   }
 
+  await assertDeviceCanSend(req.orgId)
   const result = await provider.sendMessage(req)
   return result.messageId
 }
