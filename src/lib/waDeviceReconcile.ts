@@ -10,6 +10,7 @@ export interface WaDeviceRow {
   phone_number: string | null
   last_error: string | null
   alerted_at?: string | null
+  provider?: string | null
 }
 
 export interface OrphanedSession {
@@ -109,7 +110,7 @@ export function reconcileSessions(
       liveSession.status === 'connected'
         ? 'connected'
         : liveSession.status === 'qr'
-          ? 'qr'
+          ? 'pending'
           : 'disconnected'
     if (liveStatus !== r.status) {
       stateMismatch.push({
@@ -145,7 +146,7 @@ export function buildHeartbeatUpdates(
       s.status === 'connected' && open
         ? 'connected'
         : s.status === 'qr'
-          ? 'qr'
+          ? 'pending'
           : 'disconnected'
     const healthy = status === 'connected'
     return {
@@ -156,4 +157,20 @@ export function buildHeartbeatUpdates(
       clear_error: healthy,
     }
   })
+}
+
+/** Include persisted devices missing from memory; never resurrect revoked/Meta rows. */
+export function buildDeviceStatusUpdates(
+  live: Session[], rows: WaDeviceRow[], isOpen: (key: string) => boolean,
+): Array<HeartbeatUpdate & { id: string; organization_id: string }> {
+  const byKey = new Map(buildHeartbeatUpdates(live, isOpen).map((u) => [u.session_key, u]))
+  return rows.filter((r) => r.status !== 'revoked' &&
+    (r.provider == null || r.provider === 'baileys') && !!r.session_key && !r.session_key.startsWith('meta-'))
+    .map((r) => ({
+      ...(byKey.get(r.session_key) ?? {
+        session_key: r.session_key, status: 'disconnected', refresh_seen: false,
+        last_error: null, clear_error: false,
+      }),
+      id: r.id, organization_id: r.organization_id,
+    }))
 }

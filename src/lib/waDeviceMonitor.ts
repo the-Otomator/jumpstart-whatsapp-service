@@ -2,10 +2,10 @@ import { listActiveSessions, getBaileysSocket } from '../sessionManager'
 import { isSocketOpen } from '../providers/baileys/baileysProvider'
 import { jumpstartSupabase } from './jumpstartSupabase'
 import { logger } from './logger'
-import { buildHeartbeatUpdates, type WaDeviceRow } from './waDeviceReconcile'
+import { buildDeviceStatusUpdates, type WaDeviceRow } from './waDeviceReconcile'
 import { toWaDeviceStatus } from './disconnectReason'
 
-const HEARTBEAT_INTERVAL_MS = Number(process.env.WA_HEARTBEAT_INTERVAL_MS ?? 60_000)
+const HEARTBEAT_INTERVAL_MS = 60_000
 const OUTAGE_ALERT_MS = Number(process.env.WA_OUTAGE_ALERT_MS ?? 10 * 60_000)
 const ALERT_TO = process.env.WA_ALERT_TO_PHONE ?? '972528393669'
 const ALERT_FROM =
@@ -75,26 +75,34 @@ async function runHeartbeatTick(): Promise<void> {
   if (!jumpstartSupabase) return
 
   const live = listActiveSessions().filter((s) => s.provider === 'baileys')
-  const updates = buildHeartbeatUpdates(live, (key) => isSocketOpen(getBaileysSocket(key)))
-
   try {
-    const { data, error } = await jumpstartSupabase.rpc('wa_devices_heartbeat', {
-      p_updates: updates,
-    })
-
-    if (error) {
-      heartbeatFailures += 1
-      logger.warn(
-        { err: error.message, heartbeatFailures, sessions: updates.length },
-        'wa_devices heartbeat failed'
-      )
-      return
+    const rows: WaDeviceRow[] = []
+    for (let offset = 0; ; offset += 500) {
+      const { data, error } = await jumpstartSupabase.from('wa_devices')
+        .select('id, organization_id, name, session_key, status, provider, phone_number, last_error')
+        .neq('status', 'revoked').order('id').range(offset, offset + 499)
+      if (error) throw error
+      rows.push(...(data ?? []) as WaDeviceRow[])
+      if ((data ?? []).length < 500) break
     }
-
-    logger.debug(
-      { sessions: updates.length, updated: data ?? null, heartbeatFailures },
-      'wa_devices heartbeat ok'
-    )
+    const updates = buildDeviceStatusUpdates(live, rows, (key) => isSocketOpen(getBaileysSocket(key)))
+    const now = new Date().toISOString()
+    // Isolate failures: one invalid row must not abort every other device's sync.
+    const failures: string[] = []
+    for (let offset = 0; offset < updates.length; offset += 10) {
+      await Promise.all(updates.slice(offset, offset + 10).map(async (u) => {
+        const { error } = await jumpstartSupabase!.from('wa_devices').update({
+          status: u.status, updated_at: now,
+          ...(u.refresh_seen ? { last_seen_at: now } : {}),
+          ...(u.clear_error ? { last_error: null } : {}),
+        }).eq('id', u.id).eq('organization_id', u.organization_id)
+          .eq('session_key', u.session_key).neq('status', 'revoked')
+          .or('provider.is.null,provider.eq.baileys')
+        if (error) failures.push(`${u.id}: ${error.message}`)
+      }))
+    }
+    if (failures.length) throw new Error(failures.join('; '))
+    logger.debug({ devices: updates.length, heartbeatFailures }, 'wa_devices heartbeat ok')
   } catch (err) {
     heartbeatFailures += 1
     logger.warn({ err, heartbeatFailures }, 'wa_devices heartbeat threw')
