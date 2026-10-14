@@ -1,3 +1,4 @@
+import { getHaRuntime } from './ha/coordinator'
 import type { Session } from './types'
 import {
   getProvider,
@@ -42,12 +43,23 @@ export function getQR(orgId: string): string | undefined {
   return provider?.getQR(orgId)
 }
 
-export function stopSession(
+export async function stopSession(
   orgId: string,
   options?: { keepAuthFiles?: boolean; purgeAuthDir?: boolean }
-): void {
+): Promise<void> {
   const provider = getProviderForOrg(orgId) ?? getProvider('baileys')
-  provider.stop(orgId, options)
+  const ha = getHaRuntime()
+  if (ha && provider.type === 'baileys') {
+    await ha.transition(orgId, async () => {
+      await ha.acquireSession(orgId)
+      if (!options?.keepAuthFiles) {
+        const meta = (await ha.catalog(false)).find(entry => entry.key === orgId)?.meta || { webhookUrl: '' }
+        await ha.saveMeta(orgId, meta, false, options?.purgeAuthDir === true)
+      }
+      await (provider as BaileysProvider).closeHaSocket(orgId)
+      provider.stop(orgId, options)
+    })
+  } else provider.stop(orgId, options)
 }
 
 export async function migrateSession(
@@ -74,10 +86,10 @@ export function getBaileysSocket(orgId: string): ReturnType<typeof makeWASocket>
  * Update webhookUrl on a live session without reconnecting.
  * Works for Baileys and Meta Cloud sessions currently in memory.
  */
-export function updateSessionWebhook(
+export async function updateSessionWebhook(
   orgId: string,
   webhookUrl: string
-): { previous: string | undefined; next: string } {
+): Promise<{ previous: string | undefined; next: string }> {
   const resolved = requireWebhookUrl(webhookUrl)
   const provider = getProviderForOrg(orgId)
   if (!provider) {
@@ -85,6 +97,11 @@ export function updateSessionWebhook(
   }
 
   if (provider.type === 'baileys') {
+    const ha = getHaRuntime()
+    if (ha) {
+      const meta = (await ha.catalog(false)).find(entry => entry.key === orgId)?.meta || {}
+      await ha.saveMeta(orgId, { ...meta, webhookUrl: resolved })
+    }
     return (provider as BaileysProvider).updateWebhookUrl(orgId, resolved)
   }
   if (provider.type === 'meta-cloud') {

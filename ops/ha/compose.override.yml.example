@@ -1,0 +1,10 @@
+# Copy outside Git only after approved deployment. Use with docker-compose.yml.
+services:
+  whatsapp-service:
+    restart: "no"
+    labels:
+      - traefik.enable=false
+    env_file:
+      - /etc/wa-ha/runtime.env
+    volumes:
+      - /etc/wa-ha/db-ca.pem:/etc/wa-ha/db-ca.pem:ro

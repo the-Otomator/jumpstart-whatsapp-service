@@ -6,7 +6,7 @@ let isShuttingDown = false
 
 export function setupGracefulShutdown(
   server: Server,
-  opts?: { onShutdown?: () => void }
+  opts?: { onShutdown?: () => void | Promise<void>; afterSessions?: () => Promise<void> }
 ): void {
   const shutdown = async (signal: string) => {
     if (isShuttingDown) return
@@ -15,7 +15,7 @@ export function setupGracefulShutdown(
     logger.info({ signal }, 'Shutdown signal received, cleaning up...')
 
     try {
-      opts?.onShutdown?.()
+      await opts?.onShutdown?.()
     } catch (err) {
       logger.warn({ err }, 'onShutdown hook failed')
     }
@@ -31,12 +31,14 @@ export function setupGracefulShutdown(
 
     for (const { orgId } of active) {
       try {
-        stopSession(orgId, { keepAuthFiles: true })
+        await stopSession(orgId, { keepAuthFiles: true })
         logger.debug({ orgId }, 'Session socket closed')
       } catch (err) {
         logger.warn({ orgId, err }, 'Error closing session')
       }
     }
+
+    try { await opts?.afterSessions?.() } catch { logger.warn('HA final shutdown failed') }
 
     // 3. Give a moment for cleanup, then exit
     setTimeout(() => {

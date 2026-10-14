@@ -1,3 +1,5 @@
+import { getHaRuntime } from '../../ha/coordinator'
+import { useSharedAuthState } from '../../ha/authState'
 import { assertDeviceCanSend, readDeviceListenOnly } from '../../lib/deviceSendPolicy'
 import makeWASocket, {
   DisconnectReason,
@@ -124,6 +126,14 @@ export class BaileysProvider implements WhatsAppProvider {
   private heldSessionLocks = new Set<string>()
 
   async start(orgId: string, webhookUrl?: string): Promise<void> {
+    const ha = getHaRuntime()
+    if (ha) return ha.transition(orgId, () => this.startOwned(orgId, webhookUrl))
+    return this.startOwned(orgId, webhookUrl)
+  }
+
+  private async startOwned(orgId: string, webhookUrl?: string): Promise<void> {
+    const ha = getHaRuntime()
+    if (ha) await ha.acquireSession(orgId)
     const log = orgLogger(orgId)
     // Fail loud before any socket work — a session without a webhook looks healthy but drops inbound.
     const resolvedWebhookUrl = requireWebhookUrl(webhookUrl)
@@ -144,7 +154,8 @@ export class BaileysProvider implements WhatsAppProvider {
       this.intentionallyStoppedOrgIds.add(orgId)
       if (old) this.suppressReconnectSockets.add(old)
       try {
-        old?.end(undefined)
+        if (ha && old) await ha.closeSocket(orgId, old)
+        else old?.end(undefined)
       } catch {
         // ignore teardown errors
       }
@@ -160,16 +171,19 @@ export class BaileysProvider implements WhatsAppProvider {
     }
     this.sessions.set(orgId, session)
 
-    saveSessionMeta({
+    const sharedMeta = {
       orgId,
-      provider: 'baileys',
+      provider: 'baileys' as const,
       webhookUrl: resolvedWebhookUrl,
       createdAt: new Date().toISOString(),
       autoRestore: true,
-    })
+    }
+
+    if (ha) await ha.saveMeta(orgId, sharedMeta)
+    else saveSessionMeta(sharedMeta)
 
     // Cross-process single-writer: refuse if another live process holds the auth dir.
-    try {
+    if (!ha) try {
       acquireSessionLock(orgId)
       this.heldSessionLocks.add(orgId)
     } catch (err) {
@@ -185,7 +199,8 @@ export class BaileysProvider implements WhatsAppProvider {
     }
 
     const authDir = path.join(process.cwd(), 'sessions', orgId)
-    const { state, saveCreds } = await useHardenedMultiFileAuthState(authDir)
+    const { state, saveCreds } = ha ? await useSharedAuthState(ha, orgId) : await useHardenedMultiFileAuthState(authDir)
+    if (ha) await saveCreds()
     const { version } = await fetchLatestBaileysVersion()
 
     log.info({ version }, 'Creating Baileys socket')
@@ -195,7 +210,7 @@ export class BaileysProvider implements WhatsAppProvider {
     }
     const msgRetryCounterCache = this.msgRetryCaches.get(orgId)!
 
-    const sock = makeWASocket({
+    const rawSock = makeWASocket({
       version,
       auth: {
         creds: state.creds,
@@ -230,11 +245,22 @@ export class BaileysProvider implements WhatsAppProvider {
         }
       },
     })
+    const sock = ha ? ha.protectSocket(orgId, rawSock, () => {
+      this.intentionallyStoppedOrgIds.add(orgId)
+      this.suppressReconnectSockets.add(rawSock)
+      this.clearReconnectTimer(orgId); this.stopKeepalive(orgId)
+      const ws = (rawSock.ws as any)?.socket || rawSock.ws
+      try { (ws as any)?.terminate?.() } finally { rawSock.end(undefined) }
+      this.sockets.delete(orgId)
+      session.status = 'disconnected'; session.lastError = 'HA_SELF_FENCED'
+    }) : rawSock
     this.sockets.set(orgId, sock)
 
-    sock.ev.on('creds.update', saveCreds)
+    sock.ev.on('creds.update', ha ? () => { void saveCreds().catch(() => { ha.fence('SELF_FENCED') }) } : saveCreds)
 
     sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+      if (connection === 'open') ha?.markConnected(orgId, true)
+      if (connection === 'close') ha?.markConnected(orgId, false)
       if (qr) {
         const base64 = await QRCode.toDataURL(qr)
         session.status = 'qr'
@@ -260,7 +286,7 @@ export class BaileysProvider implements WhatsAppProvider {
         session.qr = undefined
         log.info({ phone: session.phoneNumber }, 'Session connected')
 
-        updateSessionMeta(orgId, {
+        if (!ha) updateSessionMeta(orgId, {
           phoneNumber: session.phoneNumber,
           lastConnected: new Date().toISOString(),
         })
@@ -595,6 +621,7 @@ export class BaileysProvider implements WhatsAppProvider {
       releaseSessionLock(orgId)
       this.heldSessionLocks.delete(orgId)
     }
+    if (getHaRuntime()) return
     if (purgeAuth) {
       deleteSessionAuthDir(orgId)
       log.info('Session stopped — all pairing data removed from disk')
@@ -605,6 +632,14 @@ export class BaileysProvider implements WhatsAppProvider {
     } else {
       log.info('Session stopped (auth files kept for migrate)')
     }
+  }
+
+  async closeHaSocket(orgId: string): Promise<void> {
+    const ha = getHaRuntime(), sock = this.sockets.get(orgId)
+    if (!ha || !sock) return
+    this.intentionallyStoppedOrgIds.add(orgId); this.suppressReconnectSockets.add(sock)
+    this.clearReconnectTimer(orgId); this.stopKeepalive(orgId)
+    await ha.closeSocket(orgId, sock)
   }
 
   getStatus(orgId: string): Session | undefined {
@@ -677,6 +712,7 @@ export class BaileysProvider implements WhatsAppProvider {
     const previous = session.webhookUrl
     session.webhookUrl = resolved
     session.lastError = undefined
+    if (getHaRuntime()) return { previous, next: resolved }
     updateSessionMeta(orgId, { webhookUrl: resolved })
     // Ensure meta exists even if updateSessionMeta no-op'd (no prior meta file).
     const meta = loadSessionMeta(orgId)
@@ -699,6 +735,7 @@ export class BaileysProvider implements WhatsAppProvider {
 
   /** Recover lost sessions without replacing healthy sockets or QR pairing flows. */
   async recoverDisconnectedSessions(): Promise<void> {
+    if (getHaRuntime()) { await this.restoreSessions(); return }
     for (const orgId of listStoredSessions()) {
       const eligible = () => {
         const meta = loadSessionMeta(orgId)
@@ -722,6 +759,13 @@ export class BaileysProvider implements WhatsAppProvider {
   }
 
   async restoreSessions(): Promise<void> {
+    const ha = getHaRuntime()
+    if (ha) {
+      for (const entry of await ha.catalog()) {
+        if (!this.sockets.has(entry.key)) await this.start(entry.key, entry.meta.webhookUrl)
+      }
+      return
+    }
     const orgIds = listStoredSessions()
     if (orgIds.length === 0) {
       logger.info('No stored sessions to restore')
@@ -756,6 +800,7 @@ export class BaileysProvider implements WhatsAppProvider {
   }
 
   async migrateSession(fromOrgId: string, toOrgId: string, webhookUrl?: string): Promise<void> {
+    if (getHaRuntime()) throw new Error('HA_SESSION_REKEY_REQUIRES_OFFLINE_APPROVED_MIGRATION')
     if (fromOrgId === toOrgId) {
       await this.start(fromOrgId, webhookUrl)
       return

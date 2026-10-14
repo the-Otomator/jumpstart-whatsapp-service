@@ -1,3 +1,4 @@
+import { getHaRuntime } from './ha/coordinator'
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
@@ -90,6 +91,7 @@ if (!process.env.API_SECRET) {
   process.exit(1)
 }
 
+const ha = getHaRuntime()
 const app = express()
 const PORT = process.env.PORT ?? 3001
 
@@ -232,7 +234,8 @@ const connectLimiter = rateLimit({
 
 // Health check (no auth)
 app.get('/health', (_req, res) => {
-  res.json({ ok: true })
+  const ok = !ha || ha.canServe()
+  res.status(ok ? 200 : 503).json({ ok, ...(ha ? { role: ha.state() } : {}) })
 })
 
 async function detailedHealth(_req: express.Request, res: express.Response): Promise<void> {
@@ -279,6 +282,12 @@ function validRuntimeBuildValue(value: string | undefined): string | undefined {
   return normalized && normalized !== 'unknown' ? normalized : undefined
 }
 
+// Active/standby routing: no customer operations on an unready or fenced worker.
+app.use(['/api', '/connect'], (_req, res, next) => {
+  if (ha && !ha.canServe()) { res.set('Retry-After', '5').status(503).json({ code: 'HA_NOT_ACTIVE' }); return }
+  next()
+})
+
 // Limit connect page loads, but keep token-authenticated status polling on its
 // own per-session limiter inside the connect router.
 app.get('/connect/:orgId', connectLimiter)
@@ -320,7 +329,8 @@ const server = app.listen(PORT, async () => {
 
   // Auto-restore previously connected sessions
   try {
-    await restoreSessions()
+    if (ha) await ha.start(restoreSessions)
+    else await restoreSessions()
   } catch (err) {
     logger.error({ err }, 'Error during session restore')
   }
@@ -333,10 +343,11 @@ const server = app.listen(PORT, async () => {
 
 // Graceful shutdown
 setupGracefulShutdown(server, {
-  onShutdown: () => {
+  onShutdown: async () => {
     sessionRecovery.stop()
     stopWaDeviceMonitor()
     stopMediaPruneScheduler()
     stopWebhookAudit()
   },
+  afterSessions: async () => { if (ha) await ha.shutdown() },
 })
