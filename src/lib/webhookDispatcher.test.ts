@@ -51,6 +51,13 @@ async function testClassifications(): Promise<void> {
   assert.strictEqual(other4xx.category, 'http_rejected')
   assert.strictEqual(other4xx.httpStatus, 422)
 
+  const rejected = await attemptPost(URL, { event: 'pool_paused' }, 1,
+    (async () => new Response(JSON.stringify({ error: 'missing message' }), { status: 400 })) as typeof fetch)
+  assert.strictEqual(rejected.errorCode, 'missing message')
+  const unsafeReject = await attemptPost(URL, { event: 'message' }, 1,
+    (async () => new Response(JSON.stringify({ error: 'private message text' }), { status: 400 })) as typeof fetch)
+  assert.strictEqual(unsafeReject.errorCode, 'http_rejected')
+
   const serverError = await attemptPost(URL, {}, 1, fetchReturning(503).fetchImpl)
   assert.strictEqual(serverError.category, 'http_rejected')
   assert.strictEqual(serverError.httpStatus, 503)

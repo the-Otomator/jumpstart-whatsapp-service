@@ -38,6 +38,16 @@ const failureLog: WebhookFailure[] = []
 const healthWriteChains = new Map<string, Promise<void>>()
 const sessionWebhookSecrets = new Map<string, string>()
 const legacySecretWarnings = new Set<string>()
+const SAFE_REJECT_REASONS = new Set([
+  'bad json', 'missing message', 'missing sender', 'group message missing groupId',
+  'unknown session key', 'unauthorized', 'missing x-wa-session-key header',
+])
+
+function safeWebhookEvent(payload: Record<string, unknown>): string {
+  const event = payload.event
+  return typeof event === 'string' && /^[a-zA-Z][a-zA-Z0-9._-]{0,63}$/.test(event)
+    ? event : 'unknown'
+}
 const DEFAULT_WEBHOOK_SECRET_ALLOWED_HOSTS = [
   'api.jumpstart.co.il',
   'dgxnnwnugdxzeopleera.supabase.co',
@@ -194,15 +204,26 @@ export async function attemptPost(
       const category = response.status === 401 || response.status === 403
         ? 'auth_rejected'
         : 'http_rejected'
+      // Never log arbitrary response text: upstream errors can contain user data.
+      let reason = category
+      if (response.status === 400) {
+        try {
+          const body = await response.json() as { error?: unknown }
+          if (typeof body.error === 'string' && SAFE_REJECT_REASONS.has(body.error)) {
+            reason = body.error
+          }
+        } catch { /* non-JSON response */ }
+      }
       logger.warn(
-        { url: redactWebhookUrl(url), status: response.status, attempt },
+        { url: redactWebhookUrl(url), status: response.status, attempt,
+          event: safeWebhookEvent(payload as Record<string, unknown>), reason },
         'Webhook returned non-OK status'
       )
       return {
         ok: false,
         category,
         httpStatus: response.status,
-        errorCode: category,
+        errorCode: reason,
       }
     }
 
@@ -281,6 +302,8 @@ export async function postWebhook(
   logger.error(
     {
       orgId,
+      event: safeWebhookEvent(payload),
+      reason: failure.errorCode,
       url: failure.url,
       category: failure.category,
       status: failure.httpStatus,
