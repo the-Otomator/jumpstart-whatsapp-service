@@ -123,6 +123,8 @@ jobs:
             done < <(jq -c '.[] | select(.status != "removed" and (.path | test("^supabase/migrations/[0-9]{14}_.+\\.sql$")))' <<<"$file_data")
             ops "$(jq -nc --arg repo "$REPO" --argjson n "$n" --arg sha "$sha" --argjson files "$files" --argjson removed "$removed" --argjson migrations "$migrations" '{action:"sync_detail",repo:$repo,number:$n,head_sha:$sha,files:$files,removed_files:$removed,migrations:$migrations}')" >/dev/null
           done < <(jq -c '.[]' <<<"$prs")
+          # admin-sync-only:v1 — An explicit admin sync must never also execute queued day merges.
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$mode" = "sync" ]; then exit 0; fi
           if [ "$mode" != "merge" ]; then
             # ---------- day path: "merge now" approvals, L0/L1 only ----------
             in_window && exit 0   # scheduled window runs handle approved releases

@@ -37,6 +37,7 @@ jobs:
       contents: read
       pull-requests: read
       statuses: write
+      issues: read
     timeout-minutes: 50
     steps:
       - name: Evaluate release window
@@ -64,15 +65,18 @@ jobs:
             in_weekend_window
           }
           evaluate() {
-            local n="$1" pr base sha labels files nondoc st d
+            local n="$1" pr base sha labels files nondoc st d approval
             pr=$(gh api "repos/$REPO/pulls/$n")
             base=$(jq -r .base.ref <<<"$pr"); sha=$(jq -r .head.sha <<<"$pr")
             labels=$(jq -r '[.labels[].name] | join(",")' <<<"$pr")
             files=$(gh api --paginate "repos/$REPO/pulls/$n/files?per_page=100" --jq '.[].filename')
             nondoc=$(printf '%s\n' "$files" | grep -Ev "$EXEMPT_RE" || true)
+            # Only the trusted app can attest Nizan's approval. Latest marker
+            # wins, and approval cannot survive a new PR head or revocation.
+            approval=$(gh api --paginate "repos/$REPO/issues/$n/comments?per_page=100" | jq -s '[.[][] | select(.user.login == "otomator-release-gate[bot]" and .user.type == "Bot") | select(.body | test("^<!-- otomator-off-window:(enabled|disabled):[a-f0-9]{40} -->$"))] | sort_by(.id) | last | .body // ""' -r)
             if [ "$base" != "$PROD_BRANCH" ]; then st=success; d="Not a production branch"
             elif [ -z "$nondoc" ]; then st=success; d="Docs/agent-rules only"
-            elif [[ ",$labels," == *",off-window-approved,"* ]]; then st=success; d="Off-window approved (label)"
+            elif [[ ",$labels," == *",off-window-approved,"* ]] && [ "$approval" = "<!-- otomator-off-window:enabled:$sha -->" ]; then st=success; d="Off-window approved (label)"
             elif in_window; then st=success; d="Inside release window: nightly 23-06 / Thu 23-Sun 08 IL"
             else st=pending; d="Windows: nightly 23-06 / Thu 23-Sun 08 IL; or off-window-approved"; fi
             gh api -X POST "repos/$REPO/statuses/$sha" -f state="$st" -f context=release-window -f description="$d" -f target_url="$RUN_URL" >/dev/null
