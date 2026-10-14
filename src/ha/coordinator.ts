@@ -99,7 +99,8 @@ export class HaCoordinator {
   private async takeover(owner: string, boot: string): Promise<void> {
     this.fencing = true
     try {
-      if (!this.fencer || !this.identity?.fencingEnabled) throw new Error('HA_FENCING_NOT_ACTIVATED')
+      if (!this.fencer) throw new Error('HA_FENCER_NOT_CONFIGURED')
+      // begin_fence checks the current DB approval flag, including activation/revocation after startup.
       const plan = await this.store.beginFence(owner, boot)
       const evidence = await this.fencer.powerOffAndConfirm(plan)
       await this.store.confirmFence(plan, evidence)

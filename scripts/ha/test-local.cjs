@@ -82,6 +82,11 @@ async function main() {
   await assert.rejects(()=>A.renew(leaseA),/HA_STALE_LEASE/)
   const blocked=await B.claim(leaseA.key);assert.equal(blocked.owned,false);assert.equal(blocked.expired,true)
  })
+ await test('live DB fencing flag blocks actions until explicitly activated',async()=>{
+  await db.query("update wa_ha.nodes set fencing_enabled=false where node_id='b'")
+  await assert.rejects(()=>B.beginFence('a',bootA),/HA_FENCING_NOT_ACTIVATED/)
+  await db.query("update wa_ha.nodes set fencing_enabled=true where node_id='b'")
+ })
  const plan=await B.beginFence('a',bootA)
  await test('unconfirmed fence and wrong resource cannot transfer ownership',async()=>{
   await assert.rejects(()=>B.confirmFence({...plan,resourceId:'wrong'},'fixture-off'),/HA_FENCE_CONFIRMATION_INVALID/)
