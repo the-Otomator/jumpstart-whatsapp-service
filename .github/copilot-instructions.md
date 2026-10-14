@@ -6,6 +6,38 @@ Also binding: `CLAUDE.md` and `AGENTS.md` in this repo. Where they talk about Co
 **your task is the GitHub issue (or the PR comment that mentions you)** and your report is the PR description.
 Everything else in those files — release windows, security, data and payment rules — still applies in full.
 
+## Release steps
+Copilot writes and reviews the post-merge plan before merge. Only a fixed script
+executes it after the night merge; no AI executes SQL, deploys or live checks.
+This section governs the plan even where older text refers to human execution.
+Contract: https://github.com/the-Otomator/otomator-admin/blob/master/docs/RELEASE-STEPS.md
+
+For post-merge work, put `Release: manual` in the PR body, followed by:
+```text
+Release steps:
+- verify: <https URL> contains "<exact string>"
+- manual: <free text — anything a script cannot do>
+```
+Keep only applicable lines; fill every placeholder. With no post-merge work,
+omit both the block and `Release: manual`. Update the plan after every push.
+This service deploys with Docker/SSH on wa-prod-1. Record that deployment in
+`manual:` plus `verify`; there is no Docker/SSH executor field. Do not invent
+Supabase migration/function or Worker steps here. Never SSH or send WhatsApp.
+Every deploy needs `verify` against its real production HTTPS target with an
+exact response string; never a Preview, localhost or stale unrelated deployment.
+Verification must be read-only, with no payment, message send or production write.
+Use `manual:` for unsupported work or verification that cannot safely use this
+format; any manual line requires Nizan's explicit approval, never AI execution.
+Never include secrets, tokens, private keys, signed secret URLs, SQL or commands.
+
+On EVERY PR, Copilot code review compares the complete diff with this block and
+the manual-release marker. Flag missing migrations, missing/extra function names
+(including shared-module importers), wrong Worker names, deploys without verify,
+non-production verify URLs, direct SQL outside the queue, unsupported SSH/D1
+automation, secrets and risky/manual gaps. If no post-merge work exists, flag an
+unnecessary block/marker. Comment in English with the exact missing or corrected
+PR-body line and the affected file/target. Never execute the plan or change gates.
+
 ## Scope and branches
 - One issue = one branch = one PR. Work only on your own `copilot/*` branch, based on the latest default branch.
 - Do only what the issue asks. No drive-by refactors, renames, dependency bumps or formatting sweeps.
