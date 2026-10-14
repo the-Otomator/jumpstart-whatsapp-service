@@ -9,6 +9,7 @@ import { formatDisconnectReason, toWaDeviceStatus } from './disconnectReason'
 import {
   buildHeartbeatUpdates,
   buildDeviceStatusUpdates,
+  summarizeDeviceStatusSync,
   reconcileSessions,
   type WaDeviceRow,
 } from './waDeviceReconcile'
@@ -213,3 +214,12 @@ assert.deepStrictEqual(synced.map((u) => [u.id, u.status]), [
 ])
 assert.ok(synced.every((u) => ['pending', 'connected', 'disconnected'].includes(u.status)))
 console.log('Bidirectional reconciliation, absent sessions, QR constraint, revoked/Meta isolation: passed')
+assert.deepStrictEqual(summarizeDeviceStatusSync(deviceRows, synced, new Set(['open', 'closed'])),
+  { devices: 4, mismatched: 4, corrected: 2, remaining: 2 })
+assert.deepStrictEqual(summarizeDeviceStatusSync(deviceRows, synced, new Set(synced.map((u) => u.id))),
+  { devices: 4, mismatched: 4, corrected: 4, remaining: 0 })
+const converged = deviceRows.map((row) => ({ ...row,
+  status: synced.find((update) => update.id === row.id)?.status ?? row.status }))
+assert.deepStrictEqual(summarizeDeviceStatusSync(converged, synced, new Set()),
+  { devices: 4, mismatched: 0, corrected: 0, remaining: 0 })
+console.log('Cycle counts: partial failures, confirmed corrections and converged zero: passed')

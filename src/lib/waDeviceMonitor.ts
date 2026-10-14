@@ -2,7 +2,7 @@ import { listActiveSessions, getBaileysSocket } from '../sessionManager'
 import { isSocketOpen } from '../providers/baileys/baileysProvider'
 import { jumpstartSupabase } from './jumpstartSupabase'
 import { logger } from './logger'
-import { buildDeviceStatusUpdates, type WaDeviceRow } from './waDeviceReconcile'
+import { buildDeviceStatusUpdates, summarizeDeviceStatusSync, type WaDeviceRow } from './waDeviceReconcile'
 import { toWaDeviceStatus } from './disconnectReason'
 
 const HEARTBEAT_INTERVAL_MS = 60_000
@@ -72,7 +72,12 @@ async function fetchDeviceRows(sessionKeys: string[]): Promise<WaDeviceRow[]> {
 }
 
 async function runHeartbeatTick(): Promise<void> {
-  if (!jumpstartSupabase) return
+  const cycleAt = new Date().toISOString()
+  if (!jumpstartSupabase) {
+    logger.warn({ cycleAt, mismatched: null, corrected: 0, remaining: null,
+      reason: 'jumpstart_not_configured' }, 'wa_device_status_sync')
+    return
+  }
 
   const live = listActiveSessions().filter((s) => s.provider === 'baileys')
   try {
@@ -89,23 +94,32 @@ async function runHeartbeatTick(): Promise<void> {
     const now = new Date().toISOString()
     // Isolate failures: one invalid row must not abort every other device's sync.
     const failures: string[] = []
+    const appliedIds = new Set<string>()
     for (let offset = 0; offset < updates.length; offset += 10) {
       await Promise.all(updates.slice(offset, offset + 10).map(async (u) => {
-        const { error } = await jumpstartSupabase!.from('wa_devices').update({
+        const { data, error } = await jumpstartSupabase!.from('wa_devices').update({
           status: u.status, updated_at: now,
           ...(u.refresh_seen ? { last_seen_at: now } : {}),
           ...(u.clear_error ? { last_error: null } : {}),
         }).eq('id', u.id).eq('organization_id', u.organization_id)
           .eq('session_key', u.session_key).neq('status', 'revoked')
-          .or('provider.is.null,provider.eq.baileys')
+          .or('provider.is.null,provider.eq.baileys').select('id')
         if (error) failures.push(`${u.id}: ${error.message}`)
+        else if (data?.some((row) => row.id === u.id)) appliedIds.add(u.id)
       }))
     }
-    if (failures.length) throw new Error(failures.join('; '))
-    logger.debug({ devices: updates.length, heartbeatFailures }, 'wa_devices heartbeat ok')
+    const counts = summarizeDeviceStatusSync(rows, updates, appliedIds)
+    // Info level, including zero cycles, is the read-only post-release acceptance source.
+    logger.info({ cycleAt, ...counts, failures: failures.length, heartbeatFailures }, 'wa_device_status_sync')
+    if (failures.length) {
+      heartbeatFailures += 1
+      logger.warn({ failures, heartbeatFailures }, 'wa_devices heartbeat failed')
+      return
+    }
   } catch (err) {
     heartbeatFailures += 1
-    logger.warn({ err, heartbeatFailures }, 'wa_devices heartbeat threw')
+    logger.warn({ err, heartbeatFailures, cycleAt, mismatched: null, corrected: 0,
+      remaining: null }, 'wa_device_status_sync')
     return
   }
 

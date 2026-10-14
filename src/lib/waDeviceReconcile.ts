@@ -174,3 +174,14 @@ export function buildDeviceStatusUpdates(
       id: r.id, organization_id: r.organization_id,
     }))
 }
+
+/** Count only confirmed writes as corrections; skipped/revoked rows are not successes. */
+export function summarizeDeviceStatusSync(
+  rows: WaDeviceRow[], updates: Array<HeartbeatUpdate & { id: string }>, appliedIds: Set<string>,
+): { devices: number; mismatched: number; corrected: number; remaining: number } {
+  const stored = new Map(rows.map((row) => [row.id, row.status]))
+  const mismatches = updates.filter((update) => stored.get(update.id) !== update.status)
+  const corrected = mismatches.filter((update) => appliedIds.has(update.id)).length
+  return { devices: updates.length, mismatched: mismatches.length, corrected,
+    remaining: mismatches.length - corrected }
+}
