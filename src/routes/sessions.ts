@@ -197,13 +197,13 @@ router.patch(
   '/:orgId/webhook',
   validateParams(orgIdParamsSchema),
   validateBody(updateWebhookSchema),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     const { orgId } = req.params
     const { webhookUrl } = req.body as { webhookUrl: string }
     const log = orgLogger(orgId)
 
     try {
-      const { previous, next } = updateSessionWebhook(orgId, webhookUrl)
+      const { previous, next } = await updateSessionWebhook(orgId, webhookUrl)
       log.info(
         {
           previous: previous ? redactWebhookUrl(previous) : null,
@@ -270,11 +270,13 @@ router.post(
 router.post(
   '/:orgId/purge',
   validateParams(orgIdParamsSchema),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response, next: import('express').NextFunction) => {
     const { orgId } = req.params
-    stopSession(orgId, { purgeAuthDir: true })
-    orgLogger(orgId).info('Session instance purged via API')
-    res.json({ success: true, orgId, purged: true })
+    try {
+      await stopSession(orgId, { purgeAuthDir: true })
+      orgLogger(orgId).info('Session instance purged via API')
+      res.json({ success: true, orgId, purged: true })
+    } catch (err) { next(err) }
   }
 )
 
@@ -367,15 +369,17 @@ router.get(
 router.delete(
   '/:orgId',
   validateParams(orgIdParamsSchema),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response, next: import('express').NextFunction) => {
     const { orgId } = req.params
     const purge =
       req.query.purge === 'true' ||
       req.query.purge === '1' ||
       req.query.wipe === 'true'
-    stopSession(orgId, { purgeAuthDir: purge })
-    orgLogger(orgId).info({ purge }, 'Session stop via API')
-    res.json({ success: true, orgId, purged: purge })
+    try {
+      await stopSession(orgId, { purgeAuthDir: purge })
+      orgLogger(orgId).info({ purge }, 'Session stop via API')
+      res.json({ success: true, orgId, purged: purge })
+    } catch (err) { next(err) }
   }
 )
 

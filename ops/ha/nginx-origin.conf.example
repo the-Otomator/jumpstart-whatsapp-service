@@ -1,0 +1,29 @@
+# TEMPLATE ONLY: replace WA_HOST and certificate paths, nginx -t before reload.
+# Never trust Cloudflare's shared global AOP CA here.
+server {
+    listen 80 default_server;
+    server_name _;
+    return 444;
+}
+server {
+    listen 443 ssl default_server;
+    ssl_reject_handshake on;
+}
+server {
+    listen 443 ssl;
+    server_name WA_HOST;
+    ssl_certificate /etc/wa-ha/origin-ca-chain.pem;
+    ssl_certificate_key /etc/wa-ha/origin-key.pem;
+    ssl_client_certificate /etc/wa-ha/our-zone-client-ca.pem;
+    ssl_verify_client on;
+    ssl_verify_depth 2;
+    if ($host != WA_HOST) { return 444; }
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 65s;
+    }
+}

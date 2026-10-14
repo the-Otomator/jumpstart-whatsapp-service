@@ -5,9 +5,10 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node dist/ha/launcher.js",
     "dev": "ts-node src/index.ts",
-    "test": "npx ts-node --transpile-only src/lib/deviceSendPolicy.test.ts && npx ts-node --transpile-only src/lib/sessionRecoveryScheduler.test.ts && npx ts-node --transpile-only src/routes/connect.test.ts && npx ts-node --transpile-only scripts/backfill-device-webhooks.test.ts && npx ts-node --transpile-only src/lib/withTimeout.test.ts && npx ts-node --transpile-only src/lib/sessionStore.purge.test.ts && npx ts-node --transpile-only src/pool/senderPool.resume.test.ts && npx ts-node --transpile-only src/providers/baileys/baileysProvider.restart.test.ts && npx ts-node --transpile-only src/providers/baileys/baileysProvider.wsOpen.test.ts && npx ts-node --transpile-only src/lib/groupInbound.test.ts && npx ts-node --transpile-only src/lib/webhookDispatcher.test.ts && npx ts-node --transpile-only src/lib/webhookAudit.test.ts && npx ts-node --transpile-only src/lib/backfillGuard.test.ts && npx ts-node --transpile-only src/lib/waDeviceMonitor.test.ts && npx ts-node --transpile-only src/lib/validateOrg.test.ts && npx ts-node --transpile-only src/lib/webhookIntegrity.test.ts && npx ts-node --transpile-only src/lib/outgoingMessageStore.test.ts && npx ts-node --transpile-only src/lib/msgRetryCache.test.ts && npx ts-node --transpile-only src/lib/sessionAuthLock.test.ts && npx ts-node --transpile-only src/lib/hardenedMultiFileAuthState.test.ts && npx ts-node --transpile-only src/lib/mediaCache.security.test.ts && npx ts-node --transpile-only src/lib/crashCapture.test.ts && npx ts-node --transpile-only src/lib/loggerRedaction.test.ts && npx ts-node --transpile-only src/bot/gemini.test.ts && npx ts-node --transpile-only src/pool/officialOtp.test.ts && npx ts-node --transpile-only src/providers/meta-cloud/officialOtpRecovery.test.ts"
+    "test": "npx ts-node --transpile-only src/lib/deviceSendPolicy.test.ts && npx ts-node --transpile-only src/lib/sessionRecoveryScheduler.test.ts && npx ts-node --transpile-only src/routes/connect.test.ts && npx ts-node --transpile-only scripts/backfill-device-webhooks.test.ts && npx ts-node --transpile-only src/lib/withTimeout.test.ts && npx ts-node --transpile-only src/lib/sessionStore.purge.test.ts && npx ts-node --transpile-only src/pool/senderPool.resume.test.ts && npx ts-node --transpile-only src/providers/baileys/baileysProvider.restart.test.ts && npx ts-node --transpile-only src/providers/baileys/baileysProvider.wsOpen.test.ts && npx ts-node --transpile-only src/lib/groupInbound.test.ts && npx ts-node --transpile-only src/lib/webhookDispatcher.test.ts && npx ts-node --transpile-only src/lib/webhookAudit.test.ts && npx ts-node --transpile-only src/lib/backfillGuard.test.ts && npx ts-node --transpile-only src/lib/waDeviceMonitor.test.ts && npx ts-node --transpile-only src/lib/validateOrg.test.ts && npx ts-node --transpile-only src/lib/webhookIntegrity.test.ts && npx ts-node --transpile-only src/lib/outgoingMessageStore.test.ts && npx ts-node --transpile-only src/lib/msgRetryCache.test.ts && npx ts-node --transpile-only src/lib/sessionAuthLock.test.ts && npx ts-node --transpile-only src/lib/hardenedMultiFileAuthState.test.ts && npx ts-node --transpile-only src/lib/mediaCache.security.test.ts && npx ts-node --transpile-only src/lib/crashCapture.test.ts && npx ts-node --transpile-only src/lib/loggerRedaction.test.ts && npx ts-node --transpile-only src/bot/gemini.test.ts && npx ts-node --transpile-only src/pool/officialOtp.test.ts && npx ts-node --transpile-only src/providers/meta-cloud/officialOtpRecovery.test.ts",
+    "test:ha": "node scripts/ha/test-local.cjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -19,6 +20,7 @@
     "express": "^4.18.2",
     "express-rate-limit": "^8.3.2",
     "helmet": "^8.1.0",
+    "pg": "8.23.1",
     "pino": "^10.0.0",
     "pino-http": "^11.0.0",
     "qrcode": "^1.5.3",
@@ -29,6 +31,7 @@
     "@types/express": "^4.17.21",
     "@types/helmet": "^0.0.48",
     "@types/node": "^22.0.0",
+    "@types/pg": "8.15.6",
     "@types/qrcode": "^1.5.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.0"
