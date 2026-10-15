@@ -1,0 +1,61 @@
+name: Admin security scan
+'on':
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      head_sha:
+        required: true
+        type: string
+      request_id:
+        required: true
+        type: string
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+run-name: admin-security PR ${{ inputs.pr_number }} @ ${{ inputs.head_sha }} / ${{ inputs.request_id }}
+concurrency:
+  group: admin-security-${{ inputs.pr_number }}
+  cancel-in-progress: true
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/github-script@v7
+      env:
+        PR_NUMBER: ${{ inputs.pr_number }}
+        HEAD_SHA: ${{ inputs.head_sha }}
+        TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+      with:
+        script: 'if(context.actor !== ''otomator-release-gate[bot]'' || process.env.TRIGGERING_ACTOR !== ''otomator-release-gate[bot]'') throw
+          new Error(''admin_dispatch_required'');
+
+          const {data:p}=await github.rest.pulls.get({...context.repo,pull_number:Number(process.env.PR_NUMBER)});if(p.state!==''open''||p.head.sha!==process.env.HEAD_SHA||p.head.repo.full_name!==`${context.repo.owner}/${context.repo.repo}`)throw
+          new Error(''invalid_head'');'
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.head_sha }}
+        persist-credentials: false
+    - uses: github/codeql-action/init@v4
+      with:
+        languages: javascript-typescript
+        queries: security-extended
+    - uses: github/codeql-action/analyze@v4
+      with:
+        upload: false
+        output: codeql-results
+    - uses: actions/upload-artifact@v4
+      with:
+        name: admin-codeql-results
+        path: codeql-results/*.sarif
+  existing_security:
+    needs:
+    - security
+    uses: ./.github/workflows/claude-security-review-suite.yml
+    with:
+      pr_number: ${{ inputs.pr_number }}
+      head_sha: ${{ inputs.head_sha }}
+      base_sha: ${{ inputs.head_sha }}
+    secrets: inherit

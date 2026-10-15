@@ -1,0 +1,115 @@
+name: Admin code check
+'on':
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      head_sha:
+        required: true
+        type: string
+      request_id:
+        required: true
+        type: string
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+concurrency:
+  group: admin-check-${{ inputs.pr_number }}
+  cancel-in-progress: true
+run-name: admin-check PR ${{ inputs.pr_number }} @ ${{ inputs.head_sha }} / ${{ inputs.request_id }}
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    outputs:
+      base_sha: ${{ steps.identity.outputs.base_sha }}
+      s0: ${{ steps.identity.outputs.s0 }}
+      s1: ${{ steps.identity.outputs.s1 }}
+    steps:
+    - uses: actions/github-script@v7
+      id: identity
+      env:
+        PR_NUMBER: ${{ inputs.pr_number }}
+        HEAD_SHA: ${{ inputs.head_sha }}
+        TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+      with:
+        script: 'if(context.actor !== ''otomator-release-gate[bot]'' || process.env.TRIGGERING_ACTOR !== ''otomator-release-gate[bot]'') throw
+          new Error(''admin_dispatch_required'');
+
+          const number = Number(process.env.PR_NUMBER), sha = process.env.HEAD_SHA;
+
+          if (!Number.isSafeInteger(number) || number < 1 || !/^[0-9a-f]{40}$/.test(sha)) throw new Error(''invalid_identity'');
+
+          const {data:pr} = await github.rest.pulls.get({...context.repo,pull_number:number});
+
+          if (pr.state !== ''open'' || pr.head.sha !== sha || pr.head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`) throw new
+          Error(''head_changed_or_fork'');
+
+          const files = await github.paginate(github.rest.pulls.listFiles,{...context.repo,pull_number:number,per_page:100});
+
+          if (files.length !== pr.changed_files) throw new Error(''incomplete_files'');
+
+          const paths=files.map(f=>f.filename);
+
+          core.setOutput(''base_sha'',pr.base.sha);
+
+          const glob = p => new RegExp(''^''+p.replace(/[.+^${}()|[\]\\]/g,''\\$&'').replace(/\*\*/g,''@@'').replace(/\*/g,''[^/]*'').replace(/@@/g,''.*'')+''$'');
+
+          const broadMoney = paths.some(p=>/billing|payment|checkout|sumit|allowance|supabase\/(_shared|functions\/_shared|migrations)|package(-lock)?\.json|\.github\//i.test(p));
+
+          const suites = [{"file":"verify-core.yml","name":"Core verification","paths":[],"core":true,"money":false},{"file":"ha-tests.yml","name":"HA
+          local integration","paths":[],"core":false,"money":false}];
+
+          for (let i=0;i<suites.length;i++) { const s=suites[i]; core.setOutput(''s''+i,String(s.core || (s.money && broadMoney) || !s.paths.length
+          || paths.some(p=>s.paths.some(g=>glob(g).test(p))))); }
+
+          '
+  suite_0:
+    name: Core verification
+    needs:
+    - identity
+    if: needs.identity.outputs.s0 == 'true'
+    uses: ./.github/workflows/verify-core.yml
+    with:
+      pr_number: ${{ inputs.pr_number }}
+      head_sha: ${{ inputs.head_sha }}
+      base_sha: ${{ needs.identity.outputs.base_sha }}
+    secrets: inherit
+  suite_1:
+    name: HA local integration
+    needs:
+    - identity
+    if: needs.identity.outputs.s1 == 'true'
+    uses: ./.github/workflows/ha-tests.yml
+    with:
+      pr_number: ${{ inputs.pr_number }}
+      head_sha: ${{ inputs.head_sha }}
+      base_sha: ${{ needs.identity.outputs.base_sha }}
+    secrets: inherit
+  result:
+    if: always()
+    needs:
+    - identity
+    - suite_0
+    - suite_1
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/github-script@v7
+      env:
+        RESULTS: ${{ toJSON(needs) }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        HEAD_SHA: ${{ inputs.head_sha }}
+      with:
+        script: 'const suiteNames={"identity":"PR identity and changed files","suite_0":"Core verification","suite_1":"HA local integration"};
+
+          const results=JSON.parse(process.env.RESULTS); const failed=Object.entries(results).filter(([k,v])=>v.result!==''success''&&v.result!==''skipped'').map(([k])=>suiteNames[k]||k);
+
+          const {data:pr}=await github.rest.pulls.get({...context.repo,pull_number:Number(process.env.PR_NUMBER)});
+
+          if(pr.head.sha!==process.env.HEAD_SHA) throw new Error(''obsolete_head'');
+
+          await github.rest.repos.createCommitStatus({...context.repo,sha:process.env.HEAD_SHA,context:''admin-code-check'',state:failed.length?''failure'':''success'',description:failed.length?(''Failed:
+          ''+failed.join('','')).slice(0,140):''Admin verification passed'',target_url:`${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
+
+          if(failed.length) core.setFailed(''Failing suites: ''+failed.join('', ''));'
