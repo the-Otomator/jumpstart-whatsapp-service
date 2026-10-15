@@ -1,0 +1,63 @@
+name: Core verification
+'on':
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      head_sha:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.head_sha }}
+        persist-credentials: false
+        fetch-depth: 0
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+    - run: npm ci
+    - run: npm test -- --run
+    - run: npm run build
+    - uses: denoland/setup-deno@v2
+      with:
+        deno-version: v2.x
+    - name: Additional feature contracts (allowance, mappings, marketing, drive, recordings,
+        support usage)
+      env:
+        BASE_SHA: ${{ inputs.base_sha }}
+      run: 'node <<''NODE''
+
+        const {execFileSync}=require(''node:child_process'');
+
+        const files=execFileSync(''git'',[''ls-files''],{encoding:''utf8''}).trim().split(''\n'');
+
+        const changed=execFileSync(''git'',[''diff'',''--name-only'',process.env.BASE_SHA+''...HEAD''],{encoding:''utf8''});
+
+        const groups=[[/billing|payment|checkout|allowance|class|supabase\/functions\/_shared|supabase\/migrations|package(-lock)?\.json/i,/allowance|pregnan|hmo/i],[/wordpress|field.?mapping/i,/field.?mapping/i],[/marketing|registration/i,/registration.?marketing|marketing.?registration/i],[/drive|cloud/i,/drive.?structure/i],[/course|recording/i,/course.*recording.*preview|recording.*preview/i],[/support/i,/support.*usage|usage.*support/i]];
+
+        const selected=files.filter(f=>/(?:[._]test|[._]spec)\.(?:ts|tsx|mjs)$/.test(f)&&groups.some(([trigger,pattern])=>trigger.test(changed)&&pattern.test(f)));
+
+        const deno=selected.filter(f=>f.startsWith(''supabase/''));const node=selected.filter(f=>f.endsWith(''.mjs''));const
+        vitest=selected.filter(f=>!deno.includes(f)&&!node.includes(f));
+
+        if(deno.length)execFileSync(''deno'',[''test'',''--no-lock'',''--node-modules-dir=none'',''--allow-read'',''--allow-env'',''--allow-sys'',''--allow-run=git'',...deno],{stdio:''inherit''});
+
+        if(node.length)execFileSync(''node'',[''--test'',...node],{stdio:''inherit''});
+
+        if(vitest.length)execFileSync(''npx'',[''vitest'',''run'',...vitest],{stdio:''inherit''});
+
+        console.log(''Additional feature contracts:'',selected);
+
+
+        NODE'

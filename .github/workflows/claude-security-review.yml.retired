@@ -1,4 +1,4 @@
-﻿name: Claude Security Review
+name: Claude Security Review
 
 permissions:
   pull-requests: write

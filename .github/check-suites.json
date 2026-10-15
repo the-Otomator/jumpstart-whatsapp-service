@@ -1,0 +1,16 @@
+[
+  {
+    "file": "verify-core.yml",
+    "name": "Core verification",
+    "paths": [],
+    "core": true,
+    "money": false
+  },
+  {
+    "file": "ha-tests.yml",
+    "name": "HA local integration",
+    "paths": [],
+    "core": false,
+    "money": false
+  }
+]
