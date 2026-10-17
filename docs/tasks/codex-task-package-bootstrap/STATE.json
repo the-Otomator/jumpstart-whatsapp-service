@@ -1,0 +1,50 @@
+{
+  "slug": "codex-task-package-bootstrap",
+  "task_id": "d04323d1-ede3-4ae2-8cf2-0549e3806654",
+  "phase": "building",
+  "phases": [
+    "new",
+    "building",
+    "ready_for_cowork",
+    "fix_requested",
+    "approved",
+    "merged",
+    "released",
+    "blocked"
+  ],
+  "round": 0,
+  "repos": [
+    {
+      "repo": "jumpstart",
+      "branch": "docs/codex-task-package",
+      "pr": null,
+      "final_sha": null
+    },
+    {
+      "repo": "jumpstart-clientportal",
+      "branch": "docs/codex-task-package",
+      "pr": null,
+      "final_sha": null
+    },
+    {
+      "repo": "jumpstart-whatsapp-service",
+      "branch": "docs/codex-task-package",
+      "pr": null,
+      "final_sha": null
+    },
+    {
+      "repo": "jumpstart-finance",
+      "branch": "docs/codex-task-package",
+      "pr": null,
+      "final_sha": null
+    },
+    {
+      "repo": "otomator-admin",
+      "branch": "docs/codex-task-package",
+      "pr": null,
+      "final_sha": null
+    }
+  ],
+  "updated_at": "2026-10-17",
+  "updated_by": "codex"
+}
