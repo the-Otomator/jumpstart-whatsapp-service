@@ -8,6 +8,8 @@ import { DisconnectReason } from '@whiskeysockets/baileys'
 import { formatDisconnectReason, toWaDeviceStatus } from './disconnectReason'
 import {
   buildHeartbeatUpdates,
+  buildDeviceStatusUpdates,
+  summarizeDeviceStatusSync,
   reconcileSessions,
   type WaDeviceRow,
 } from './waDeviceReconcile'
@@ -166,7 +168,7 @@ function testHeartbeatPayload(): void {
   assert.strictEqual(half.refresh_seen, false)
 
   const qr = updates.find((u) => u.session_key === 'sess-qr')!
-  assert.strictEqual(qr.status, 'qr')
+  assert.strictEqual(qr.status, 'pending')
   assert.strictEqual(qr.refresh_seen, false)
 }
 
@@ -195,3 +197,29 @@ assert.strictEqual(mixed.length, 1)
 assert.strictEqual(mixed[0].session_key, 'web-closed')
 assert.strictEqual(mixed[0].status, 'disconnected')
 console.log('Meta heartbeat regression: passed')
+
+const deviceRows = ['open', 'closed', 'missing', 'qr', 'revoked', 'meta'].map((key) => ({
+  id: key, organization_id: 'org', session_key: key, name: key,
+  status: key === 'open' ? 'disconnected' : key === 'revoked' ? 'revoked' : 'connected',
+  provider: key === 'meta' ? 'meta-cloud' : 'baileys', phone_number: null, last_error: null,
+}))
+const synced = buildDeviceStatusUpdates([
+  { orgId: 'open', provider: 'baileys', status: 'connected' },
+  { orgId: 'closed', provider: 'baileys', status: 'connected' },
+  { orgId: 'qr', provider: 'baileys', status: 'qr' },
+  { orgId: 'revoked', provider: 'baileys', status: 'connected' },
+], deviceRows, (key) => key === 'open' || key === 'revoked')
+assert.deepStrictEqual(synced.map((u) => [u.id, u.status]), [
+  ['open', 'connected'], ['closed', 'disconnected'], ['missing', 'disconnected'], ['qr', 'pending'],
+])
+assert.ok(synced.every((u) => ['pending', 'connected', 'disconnected'].includes(u.status)))
+console.log('Bidirectional reconciliation, absent sessions, QR constraint, revoked/Meta isolation: passed')
+assert.deepStrictEqual(summarizeDeviceStatusSync(deviceRows, synced, new Set(['open', 'closed'])),
+  { devices: 4, mismatched: 4, corrected: 2, remaining: 2 })
+assert.deepStrictEqual(summarizeDeviceStatusSync(deviceRows, synced, new Set(synced.map((u) => u.id))),
+  { devices: 4, mismatched: 4, corrected: 4, remaining: 0 })
+const converged = deviceRows.map((row) => ({ ...row,
+  status: synced.find((update) => update.id === row.id)?.status ?? row.status }))
+assert.deepStrictEqual(summarizeDeviceStatusSync(converged, synced, new Set()),
+  { devices: 4, mismatched: 0, corrected: 0, remaining: 0 })
+console.log('Cycle counts: partial failures, confirmed corrections and converged zero: passed')
