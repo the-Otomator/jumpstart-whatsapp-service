@@ -1,0 +1,56 @@
+{
+  "slug": "codex-task-package-bootstrap",
+  "task_id": "d04323d1-ede3-4ae2-8cf2-0549e3806654",
+  "phase": "ready_for_cowork",
+  "phases": [
+    "new",
+    "building",
+    "ready_for_cowork",
+    "fix_requested",
+    "approved",
+    "merged",
+    "released",
+    "blocked"
+  ],
+  "round": 0,
+  "repos": [
+    {
+      "repo": "jumpstart",
+      "branch": "docs/codex-task-package",
+      "pr": "https://github.com/the-Otomator/jumpstartapp/pull/3420",
+      "final_sha": "8e563808864dc56687765c7f15a719c829880074",
+      "base": "main"
+    },
+    {
+      "repo": "jumpstart-clientportal",
+      "branch": "docs/codex-task-package",
+      "pr": "https://github.com/the-Otomator/jumpstart-clientportal/pull/265",
+      "final_sha": "955105b2d99af3b49e9e417b6f6a14df1184c9f3",
+      "base": "main"
+    },
+    {
+      "repo": "jumpstart-whatsapp-service",
+      "branch": "docs/codex-task-package",
+      "pr": "https://github.com/the-Otomator/jumpstart-whatsapp-service/pull/86",
+      "final_sha": "8dcba7fa6553c8c411b6319d574d5c67e478c462",
+      "base": "master"
+    },
+    {
+      "repo": "jumpstart-finance",
+      "branch": "docs/codex-task-package",
+      "pr": "https://github.com/the-Otomator/jumpstart-finance/pull/208",
+      "final_sha": "9cd1817ab9ca2488c31007ca0039f4c2bcaf9cc2",
+      "base": "main"
+    },
+    {
+      "repo": "otomator-admin",
+      "branch": "docs/codex-task-package",
+      "pr": "https://github.com/the-Otomator/otomator-admin/pull/179",
+      "final_sha": "fdd5e358ac672e953f254d6d8c6646aef8293886",
+      "base": "master"
+    }
+  ],
+  "updated_at": "2026-10-17",
+  "updated_by": "codex",
+  "sha_note": "final_sha identifies the validated protocol implementation commit; the subsequent evidence-only commit is read back from each PR and recorded in the source RESULT.md."
+}
