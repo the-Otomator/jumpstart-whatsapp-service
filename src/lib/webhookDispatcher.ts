@@ -2,6 +2,7 @@ import { logger } from './logger'
 import { redactWebhookUrl } from './webhookUrl'
 import { persistWebhookHealth, type WebhookHealthResult } from './webhookHealth'
 import { isIP } from 'net'
+import { isHistoryObservation } from './waDeviceObservation'
 
 export type WebhookDispatchCategory = Extract<
   WebhookHealthResult['category'],
@@ -258,7 +259,7 @@ export async function postWebhook(
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     lastResult = await attemptPost(url, payload, attempt + 1, fetchImpl)
     if (lastResult.ok) {
-      writeHealthWithoutBlocking(orgId, lastResult, writeHealth)
+      if (!isHistoryObservation(payload)) writeHealthWithoutBlocking(orgId, lastResult, writeHealth)
       logger.debug({ orgId, event: payload.event }, 'Webhook delivered')
       return
     }
@@ -277,7 +278,7 @@ export async function postWebhook(
   failureLog.push(failure)
   if (failureLog.length > MAX_FAILURES_STORED) failureLog.shift()
 
-  writeHealthWithoutBlocking(orgId, lastResult, writeHealth)
+  if (!isHistoryObservation(payload)) writeHealthWithoutBlocking(orgId, lastResult, writeHealth)
   logger.error(
     {
       orgId,
@@ -294,10 +295,8 @@ function writeHealthWithoutBlocking(
   result: WebhookDispatchResult,
   writer: typeof persistWebhookHealth
 ): void {
-  const previous = healthWriteChains.get(sessionKey) ?? Promise.resolve()
-  const next = previous
-    .catch(() => undefined)
-    .then(() => writer(sessionKey, result))
+  if (healthWriteChains.has(sessionKey)) return
+  const next = Promise.resolve().then(() => writer(sessionKey, result))
   healthWriteChains.set(sessionKey, next)
   void next
     .catch((err) => {

@@ -1,0 +1,85 @@
+{
+  "phase": "ready_for_cowork",
+  "slug": "wa-devices-hot-row",
+  "task_id": "38c6cb7f-29a6-42fe-9378-b7dd60fa159a",
+  "repos": [
+    "the-Otomator/jumpstart-whatsapp-service",
+    "the-Otomator/jumpstartapp"
+  ],
+  "branch": "feature/wa-devices-hot-row",
+  "pr": [
+    {
+      "repo": "the-Otomator/jumpstart-whatsapp-service",
+      "number": 88,
+      "url": "https://github.com/the-Otomator/jumpstart-whatsapp-service/pull/88",
+      "head": "fa36dc28c082f46fe37a6174e6f6217dbac9de95"
+    },
+    {
+      "repo": "the-Otomator/jumpstartapp",
+      "number": 3583,
+      "url": "https://github.com/the-Otomator/jumpstartapp/pull/3583",
+      "head": "04ee4574c54e567dbff4eab030077fc157069787"
+    }
+  ],
+  "release": "night_window_after_cowork_review",
+  "round": 0,
+  "load_test": {
+    "synthetic": true,
+    "customer_sends": 0,
+    "production_requests": 0,
+    "requested_events": 7500,
+    "duration_seconds": 300,
+    "rate_per_minute": 1500,
+    "forbidden_requests": 0,
+    "status_latency_ms": 14,
+    "backfill_log_events": 7500,
+    "wall_ms": 299996,
+    "accepted": 7500,
+    "persisted": 7500,
+    "backfill_persisted": 7500,
+    "liveness_writes": 10,
+    "max_waiting_locks": 0
+  },
+  "blockers": [
+    "Pre-existing org-status guard fails identically on fetched base: groups_builder_v2.sql:135"
+  ],
+  "checks": {
+    "service_build_tests": {
+      "status": "passed",
+      "url": "https://github.com/the-Otomator/jumpstart-whatsapp-service/actions/runs/39869339253"
+    },
+    "edge_local": {
+      "status": "passed",
+      "tests": 29
+    },
+    "load_local": {
+      "status": "passed",
+      "evidence": "load-result.json"
+    },
+    "load_ci": {
+      "status": "passed",
+      "url": "https://github.com/the-Otomator/jumpstartapp/actions/runs/39869401882"
+    },
+    "current_head_ci": {
+      "status": "passed",
+      "url": "https://github.com/the-Otomator/jumpstartapp/actions/runs/39869748404"
+    },
+    "baseline_org_status_guard": {
+      "status": "failed_identically_on_base",
+      "base": "ee3d35112dd587f38ac0bb16710a791715411bbc",
+      "exit_code": 1
+    },
+    "application_typecheck_build": {
+      "status": "passed",
+      "url": "https://github.com/the-Otomator/jumpstartapp/actions/runs/39869748404"
+    }
+  },
+  "production_changed": false,
+  "next_action": "Cowork review before merge; deferred manual night release",
+  "local_staging_server": "stopped; synthetic fixture data retained",
+  "preview_url": "https://86079618.jumpstart-hub.pages.dev",
+  "release_blockers": [
+    "Cowork review and merge required before release",
+    "Service deployment must not restart or disconnect customer devices"
+  ]
+}

@@ -194,7 +194,24 @@ async function testDispatchRecombinesRegistrySecret(): Promise<void> {
   }
 }
 
+async function testHistoryDeliverySkipsAudit(): Promise<void> {
+  for (const marker of ['history', 'isBackfill', 'is_backfill', 'skipDownstream']) {
+    for (const status of [200, 500]) {
+      const mock = fetchReturning(status)
+      let writes = 0
+      await postWebhook(URL, {orgId: 'history-' + marker, event: 'message', [marker]: true}, {
+        fetchImpl: mock.fetchImpl, sleep: noSleep,
+        persistHealth: async () => { writes += 1 },
+      })
+      await flushTelemetry()
+      assert.strictEqual(mock.calls(), status === 200 ? 1 : 3, 'history retains delivery/retries')
+      assert.strictEqual(writes, 0, 'history must never persist device audit')
+    }
+  }
+}
+
 async function main(): Promise<void> {
+  await testHistoryDeliverySkipsAudit()
   testHeadersAndUrlSanitization()
   await testDispatchRecombinesRegistrySecret()
   await testClassifications()

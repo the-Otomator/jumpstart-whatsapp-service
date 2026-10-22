@@ -104,12 +104,12 @@ export function reconcileSessions(
       })
       continue
     }
-    // Compare using the same vocabulary heartbeat writes (connected/qr/disconnected).
+    // Compare using the same vocabulary heartbeat writes (connected/pending/disconnected).
     const liveStatus =
       liveSession.status === 'connected'
         ? 'connected'
         : liveSession.status === 'qr'
-          ? 'qr'
+          ? 'pending'
           : 'disconnected'
     if (liveStatus !== r.status) {
       stateMismatch.push({
@@ -145,7 +145,7 @@ export function buildHeartbeatUpdates(
       s.status === 'connected' && open
         ? 'connected'
         : s.status === 'qr'
-          ? 'qr'
+          ? 'pending'
           : 'disconnected'
     const healthy = status === 'connected'
     return {

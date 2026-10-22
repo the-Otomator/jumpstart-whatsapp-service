@@ -1,0 +1,25 @@
+name: WhatsApp device observation regression
+on:
+  pull_request:
+    paths:
+      - 'src/lib/waDevice*.ts'
+      - 'src/lib/disconnectReason.ts'
+      - 'src/lib/webhookDispatcher*.ts'
+      - 'src/lib/webhookHealth.ts'
+      - 'package.json'
+      - '.github/workflows/wa-devices-hot-row.yml'
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run build
+      - run: npm test
