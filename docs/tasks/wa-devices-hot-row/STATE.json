@@ -1,0 +1,10 @@
+{
+  "phase": "ready_for_executor",
+  "slug": "wa-devices-hot-row",
+  "task_id": "38c6cb7f-29a6-42fe-9378-b7dd60fa159a",
+  "repos": ["the-Otomator/jumpstart-whatsapp-service","the-Otomator/jumpstartapp"],
+  "pr": null,
+  "release": "night_window",
+  "round": 0,
+  "blockers": []
+}
