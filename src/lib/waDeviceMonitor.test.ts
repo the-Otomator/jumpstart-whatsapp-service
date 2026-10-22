@@ -37,7 +37,7 @@ function testFormatDisconnectReason(): void {
   )
 
   assert.strictEqual(toWaDeviceStatus('connected'), 'connected')
-  assert.strictEqual(toWaDeviceStatus('qr'), 'qr')
+  assert.strictEqual(toWaDeviceStatus('qr'), 'pending')
   assert.strictEqual(toWaDeviceStatus('connecting'), 'disconnected')
   assert.strictEqual(toWaDeviceStatus('disconnected'), 'disconnected')
 }
@@ -166,7 +166,7 @@ function testHeartbeatPayload(): void {
   assert.strictEqual(half.refresh_seen, false)
 
   const qr = updates.find((u) => u.session_key === 'sess-qr')!
-  assert.strictEqual(qr.status, 'qr')
+  assert.strictEqual(qr.status, 'pending')
   assert.strictEqual(qr.refresh_seen, false)
 }
 

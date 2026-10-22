@@ -1,10 +1,31 @@
 {
-  "phase": "ready_for_executor",
+  "phase": "validating",
   "slug": "wa-devices-hot-row",
   "task_id": "38c6cb7f-29a6-42fe-9378-b7dd60fa159a",
-  "repos": ["the-Otomator/jumpstart-whatsapp-service","the-Otomator/jumpstartapp"],
+  "repos": [
+    "the-Otomator/jumpstart-whatsapp-service",
+    "the-Otomator/jumpstartapp"
+  ],
+  "branch": "feature/wa-devices-hot-row",
   "pr": null,
-  "release": "night_window",
+  "release": "night_window_after_cowork_review",
   "round": 0,
+  "load_test": {
+    "synthetic": true,
+    "customer_sends": 0,
+    "production_requests": 0,
+    "requested_events": 7500,
+    "duration_seconds": 300,
+    "rate_per_minute": 1500,
+    "forbidden_requests": 0,
+    "status_latency_ms": 14,
+    "backfill_log_events": 7500,
+    "wall_ms": 299996,
+    "accepted": 7500,
+    "persisted": 7500,
+    "backfill_persisted": 7500,
+    "liveness_writes": 10,
+    "max_waiting_locks": 0
+  },
   "blockers": []
 }

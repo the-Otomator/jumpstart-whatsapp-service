@@ -1,0 +1,5 @@
+{
+  "test": "due observation skips held row lock",
+  "applied": false,
+  "latency_ms": 549
+}

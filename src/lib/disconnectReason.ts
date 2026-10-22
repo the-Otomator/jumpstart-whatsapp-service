@@ -30,12 +30,12 @@ export function formatDisconnectReason(lastDisconnect: unknown): string {
   return label
 }
 
-/** Map in-memory session status to wa_devices vocabulary (connected | disconnected | qr). */
+/** Map in-memory session status to wa_devices vocabulary (connected | disconnected | pending). */
 export function toWaDeviceStatus(
   status: string
-): 'connected' | 'disconnected' | 'qr' {
+): 'connected' | 'disconnected' | 'pending' {
   if (status === 'connected') return 'connected'
-  if (status === 'qr') return 'qr'
+  if (status === 'qr') return 'pending'
   // connecting / disconnected / anything else → disconnected for DB truth
   return 'disconnected'
 }
