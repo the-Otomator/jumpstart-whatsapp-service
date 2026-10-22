@@ -12,7 +12,7 @@ export async function writeWaDeviceStatus(
 ): Promise<void> {
   try {
     const {error} = await observeWaDevice(sessionKey, {status, refreshSeen: status === 'connected',
-      phoneNumber: status === 'connected' ? opts?.phoneNumber : undefined, lastError: opts?.lastError, clearError: status !== 'disconnected'})
+      phoneNumber: status === 'connected' && opts?.phoneNumber ? opts.phoneNumber : undefined, lastError: opts?.lastError, clearError: status !== 'disconnected'})
     if (error) throw error
   } catch (err) {
     logger.warn({sessionKey, status, err}, 'Error writing wa_devices status')

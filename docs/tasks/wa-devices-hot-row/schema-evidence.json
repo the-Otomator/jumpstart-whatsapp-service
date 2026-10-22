@@ -1,0 +1,46 @@
+{
+  "production_read_only": {
+    "status_values": [
+      "pending",
+      "connected",
+      "disconnected",
+      "revoked"
+    ],
+    "audit_values": [
+      "ok",
+      "invalid_config",
+      "missing_meta",
+      "auth_rejected",
+      "http_rejected",
+      "unreachable",
+      "timeout"
+    ],
+    "service_role": {
+      "select": true,
+      "update": true,
+      "bypassrls": true
+    },
+    "existing_heartbeat": {
+      "security_definer": true,
+      "execute_grants": [
+        "postgres",
+        "service_role"
+      ]
+    },
+    "trigger_names": [
+      "wa_broadcast_device_risk_stamp",
+      "wa_broadcast_device_status_guard",
+      "wa_device_number_history_fill_new_trg",
+      "wa_listen_only_device_guard"
+    ]
+  },
+  "observer_identical": true,
+  "migration_sha256": "59e2371e3715e0c1b72b3be1fa1f7d49fedea6cf37421e5097fabc182fb71115",
+  "base_org_status_failure": {
+    "base": "ee3d35112dd587f38ac0bb16710a791715411bbc",
+    "exit_code": 1,
+    "file": "20271108110000_groups_builder_v2.sql",
+    "line": 135,
+    "message": "organizations status filter excludes trial (o.status='active')"
+  }
+}
