@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>משיכת היסטוריית וואטסאפ — עיצוב</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F5F7FA;--card:#fff;--ink:#1F2937;--mute:#6B7280;--line:#E5E7EB;--blue:#2563EB;--blue-soft:#EFF4FF;--wa:#E7F8EC;--in:#fff;--out:#D9FDD3;--chat:#EFEAE2;--red:#B91C1C;--red-soft:#FEF2F2;--amber:#92400E;--amber-soft:#FFFBEB;--green:#047857;--green-soft:#ECFDF5}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:Heebo,system-ui,sans-serif;color:var(--ink)}
+header{padding:28px 20px 8px;max-width:1100px;margin:auto}h1{font-size:24px;margin:0 0 6px;font-weight:800}header p{margin:0;color:var(--mute);font-size:14px}
+.grid{max-width:1100px;margin:16px auto 40px;padding:0 16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.st{background:var(--card);border-radius:16px;box-shadow:0 2px 10px rgba(0,0,0,.04);overflow:hidden}
+.st h2{font-size:14px;margin:0;padding:10px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
+.st h2 small{color:var(--mute);font-weight:500}
+.chat{background:var(--chat);padding:10px 12px 14px;min-height:190px;display:flex;flex-direction:column;gap:6px}
+.bar{align-self:center;margin:2px 0 6px;font-size:13px;border-radius:999px;padding:6px 14px;display:inline-flex;align-items:center;gap:8px}
+.btn{background:var(--card);color:var(--blue);border:1px solid #C7D7FE;font-weight:700;cursor:pointer}
+.btn:hover{background:var(--blue-soft)}
+.load{background:var(--card);color:var(--mute)}
+.spin{width:14px;height:14px;border:2px solid #CBD5E1;border-top-color:var(--blue);border-radius:50%;animation:s 1s linear infinite}@keyframes s{to{transform:rotate(360deg)}}
+.ok{background:var(--green-soft);color:var(--green)}.info{background:var(--card);color:var(--mute)}
+.off{background:var(--amber-soft);color:var(--amber)}.err{background:var(--red-soft);color:var(--red)}
+.mini{border:0;background:transparent;color:inherit;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer;padding:0}
+.day{align-self:center;background:#fff;color:var(--mute);font-size:11px;border-radius:8px;padding:2px 8px}
+.m{max-width:78%;padding:6px 9px 4px;border-radius:9px;font-size:13.5px;line-height:1.35;box-shadow:0 1px 0 rgba(0,0,0,.06)}
+.m time{display:block;font-size:10.5px;color:var(--mute);text-align:left;margin-top:2px}
+.in{background:var(--in);align-self:flex-start}.out{background:var(--out);align-self:flex-end}
+.new{outline:2px solid #BFDBFE;animation:f 1.6s ease-out}@keyframes f{from{background:#DBEAFE}}
+.note{max-width:1100px;margin:0 auto 40px;padding:0 16px;font-size:13px;color:var(--mute)}
+.note li{margin:3px 0}
+@media (prefers-reduced-motion:reduce){.spin,.new{animation:none}}
+</style></head><body>
+<header><h1>טען הודעות קודמות — מצבי הכפתור בראש השיחה</h1>
+<p>מופיע בראש שיחת וואטסאפ פרטית בכרטיס הלקוח ובתיבת הוואטסאפ. מושך עד חודש אחורה, שני הצדדים. לא שולח כלום ללקוח.</p></header>
+<div class="grid">
+
+<section class="st"><h2>Idle — אפשר למשוך <small>B1</small></h2><div class="chat">
+<button class="bar btn">⤒ טען הודעות קודמות</button><span class="day">היום</span>
+<div class="m in">היי, רציתי לשאול על החוג של יום רביעי<time>10:31</time></div>
+<div class="m out">בטח! יש עוד 2 מקומות 😊<time>10:33</time></div></div></section>
+
+<section class="st"><h2>Loading <small>L1 · כפתור נעול</small></h2><div class="chat">
+<span class="bar load"><span class="spin"></span>מושכים הודעות מהטלפון… רגע של סבלנות ☕</span><span class="day">היום</span>
+<div class="m in">היי, רציתי לשאול על החוג של יום רביעי<time>10:31</time></div></div></section>
+
+<section class="st"><h2>Done <small>D1 · ההודעות נכנסות במקום</small></h2><div class="chat">
+<span class="bar ok">✓ נוספו 37 הודעות מהחודש האחרון</span><span class="day">12 באוקטובר</span>
+<div class="m in new">אפשר פרטים על המועדון?<time>18:02</time></div>
+<div class="m out new">היי! שולחת לך עכשיו 💛<time>18:10</time></div><span class="day">היום</span>
+<div class="m in">היי, רציתי לשאול על החוג של יום רביעי<time>10:31</time></div></div></section>
+
+<section class="st"><h2>Nothing older <small>E1</small></h2><div class="chat">
+<span class="bar info">אין הודעות קודמות מהחודש האחרון — השיחה כבר מלאה 🙂</span><span class="day">היום</span>
+<div class="m in">היי, רציתי לשאול על החוג של יום רביעי<time>10:31</time></div></div></section>
+
+<section class="st"><h2>Reached cap <small>C1 · אין כפתור</small></h2><div class="chat">
+<span class="bar info">כל ההודעות מהחודש האחרון כבר כאן</span><span class="day">27 בספטמבר</span>
+<div class="m in">תודה רבה!<time>09:14</time></div></div></section>
+
+<section class="st"><h2>No anchor — שיחה ריקה <small>N1</small></h2><div class="chat" style="justify-content:center">
+<span class="bar info" style="max-width:90%;text-align:center">עוד אין הודעות בשיחה הזו. אחרי ההודעה הראשונה נוכל למשוך גם את ההיסטוריה</span></div></section>
+
+<section class="st"><h2>Phone offline <small>O1</small></h2><div class="chat">
+<span class="bar off">הטלפון של המספר לא זמין כרגע. נסו שוב בעוד כמה דקות · <button class="mini">לנסות שוב</button></span><span class="day">היום</span>
+<div class="m in">היי, רציתי לשאול על החוג של יום רביעי<time>10:31</time></div></div></section>
+
+<section class="st"><h2>Error <small>F1 · נפתחת קריאה אוטומטית</small></h2><div class="chat">
+<span class="bar err" style="max-width:94%">משהו השתבש במשיכת ההיסטוריה. כבר פתחנו על זה קריאה — אפשר לנסות שוב מאוחר יותר</span><span class="day">היום</span>
+<div class="m in">היי, רציתי לשאול על החוג של יום רביעי<time>10:31</time></div></div></section>
+
+<section class="st" style="max-width:380px"><h2>Mobile 360px <small>אותו רכיב, רוחב מלא</small></h2><div class="chat">
+<button class="bar btn" style="align-self:stretch;justify-content:center">⤒ טען הודעות קודמות</button><span class="day">היום</span>
+<div class="m in">היי!<time>10:31</time></div></div></section>
+</div>
+<ul class="note">
+<li>Hidden: מתג הארגון כבוי, שיחת קבוצה, או אין הרשאה לשיחה — אין שום רכיב.</li>
+<li>אם המשיכה כבר רצה ברקע (סריקה / משיכה אוטומטית) — מוצג Loading גם למי שלא לחץ.</li>
+<li>Done נעלם אחרי 6 שניות וחוזר למצב Idle או Reached cap. ההודעות החדשות מסומנות לרגע במסגרת כחולה.</li>
+</ul>
+</body></html>
