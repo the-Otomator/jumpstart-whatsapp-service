@@ -27,6 +27,11 @@ export async function historyPullTick(): Promise<void> {
           connected: getStatus(session.orgId)?.status === 'connected',
           anchor: job.anchor, timestampMs: job.anchor_timestamp_ms,
           fetch: (count, key, timestamp) => sock.fetchMessageHistory(count, key, timestamp),
+          resolveJid: async jid => {
+            if (!jid.endsWith('@lid')) return jid
+            const phone = await sock.signalRepository?.lidMapping?.getPNForLID(jid)
+            return phone ?? jid
+          },
           authorize: async () => {
             if (getBaileysSocket(session.orgId) !== sock || getStatus(session.orgId)?.status !== 'connected'
               || (getHaRuntime() && !getHaRuntime()!.canServe())) return false
@@ -43,7 +48,8 @@ export async function historyPullTick(): Promise<void> {
         // The authenticated webhook atomically persists + checkpoints the page.
         // Failed delivery leaves the lease to expire, then retries the same anchor.
       } catch (error) {
-        const code = error instanceof Error && error.message === 'HISTORY_PHONE_OFFLINE' ? 'phone_offline' : 'request_failed'
+        const code = error instanceof Error && error.message === 'HISTORY_GATE_CLOSED' ? 'gate_closed'
+          : error instanceof Error && error.message === 'HISTORY_PHONE_OFFLINE' ? 'phone_offline' : 'request_failed'
         await client.rpc('wa_history_pull_fail', { p_conversation_id: job.conversation_id, p_lease: job.lease_token, p_code: code })
       }
     }

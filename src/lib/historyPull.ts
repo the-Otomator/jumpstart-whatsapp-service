@@ -20,6 +20,7 @@ export async function requestHistoryPage(input: {
   timestampMs: number; fetch: (count: number, key: WAMessageKey, timestamp: number) => Promise<string>;
   now?: () => number; sleep?: (ms: number) => Promise<void>; timeoutMs?: number;
   authorize?: () => Promise<boolean>;
+  resolveJid?: (jid: string) => Promise<string>;
 }): Promise<WAMessage[]> {
   const { session, anchor } = input
   if (!input.enabled || !input.connected || !anchor?.id || !anchor.remoteJid
@@ -54,8 +55,12 @@ export async function requestHistoryPage(input: {
     })
     sending.catch(error => rejectPage(error))
     const messages = await handledPage
-    if (messages.some(message => message.key.remoteJid !== anchor.remoteJid)) throw new Error('HISTORY_CHAT_MISMATCH')
-    return messages
+    const resolveJid = input.resolveJid ?? (async (jid: string) => jid)
+    const expected = await resolveJid(anchor.remoteJid)
+    for (const message of messages) {
+      if (await resolveJid(message.key.remoteJid ?? '') !== expected) throw new Error('HISTORY_CHAT_MISMATCH')
+    }
+    return messages.map(message => ({ ...message, key: { ...message.key, remoteJid: anchor.remoteJid } }))
   } finally {
     if (timer) clearTimeout(timer)
     pending.delete(session)
