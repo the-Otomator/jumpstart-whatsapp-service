@@ -1,4 +1,5 @@
 import { getHaRuntime } from '../../ha/coordinator'
+import { acceptHistoryPage } from '../../lib/historyPull'
 import { useSharedAuthState } from '../../ha/authState'
 import { assertDeviceCanSend, readDeviceListenOnly } from '../../lib/deviceSendPolicy'
 import makeWASocket, {
@@ -538,8 +539,9 @@ export class BaileysProvider implements WhatsAppProvider {
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type === 'notify' || type === 'append') await captureMessages(messages, type === 'append')
     })
-    sock.ev.on('messaging-history.set', async ({ messages }) => {
-      await captureMessages(messages, true)
+    sock.ev.on('messaging-history.set', async (event) => {
+      if (acceptHistoryPage(orgId, event)) return
+      await captureMessages(event.messages, true)
     })
 
     sock.ev.on('messages.update', async (updates) => {

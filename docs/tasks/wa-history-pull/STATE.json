@@ -1,0 +1,13 @@
+{
+  "slug": "wa-history-pull",
+  "task_id": "c5076c18-38a0-428f-956e-52631aba185b",
+  "phase": "new",
+  "phases": ["new", "building", "ready_for_cowork", "fix_requested", "approved", "merged", "released", "blocked"],
+  "round": 0,
+  "repos": [
+    { "repo": "jumpstart-whatsapp-service", "branch": "feature/wa-history-pull", "pr": null, "preview_url": null, "final_sha": null },
+    { "repo": "jumpstartapp", "branch": "feature/wa-history-pull", "pr": null, "preview_url": null, "final_sha": null }
+  ],
+  "updated_at": "2026-10-26",
+  "updated_by": "cowork"
+}
