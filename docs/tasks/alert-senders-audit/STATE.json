@@ -1,0 +1,51 @@
+{
+  "slug": "alert-senders-audit",
+  "task_id": "15e24bb1-2d82-457b-9b40-89328223a2bc",
+  "phase": "ready_for_cowork",
+  "phases": [
+    "new",
+    "building",
+    "ready_for_cowork",
+    "fix_requested",
+    "approved",
+    "merged",
+    "released",
+    "blocked"
+  ],
+  "round": 0,
+  "repos": [
+    {
+      "repo": "jumpstart",
+      "branch": "fix/alert-senders-audit",
+      "pr": 3796,
+      "preview_url": "https://9a6af8a5.jumpstart-hub.pages.dev/",
+      "final_sha": "64bb598a6b60de700b69bc4013623aec5b8cb9db",
+      "sha_scope": "validated implementation; documentation-only handoff commit follows"
+    },
+    {
+      "repo": "jumpstart-whatsapp-service",
+      "branch": "fix/alert-senders-audit",
+      "pr": 90,
+      "preview_url": null,
+      "final_sha": "ee2d124b41cdfb69c92d51c23e24526e42909da6",
+      "sha_scope": "validated implementation; documentation-only handoff commit follows"
+    },
+    {
+      "repo": "otomator-admin",
+      "branch": "fix/alert-senders-audit",
+      "pr": 294,
+      "preview_url": null,
+      "final_sha": "e996ec47a3f2912ce701dca6eb5371f7c7e9a916",
+      "sha_scope": "validated implementation; documentation-only handoff commit follows"
+    }
+  ],
+  "updated_at": "2026-11-01",
+  "updated_by": "Codex",
+  "acceptance": {
+    "AC-01": "scoped checks pass; unchanged repository baseline failures and unfinished broad frontend typecheck disclosed",
+    "AC-02": "pass: 25-row inventory",
+    "AC-03": "pass: foreign-device refusal and platform fallback tests",
+    "AC-04": "pass: session key is never an org lookup",
+    "AC-10": "pending Cowork"
+  }
+}
