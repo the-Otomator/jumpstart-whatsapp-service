@@ -1,0 +1,34 @@
+
+> jumpstart-whatsapp-service@1.0.0 test:alert-senders
+> npx ts-node --transpile-only src/lib/otomatorAlertPolicy.test.ts && npx ts-node --transpile-only src/lib/alertSenders.test.ts
+
+otomator_alert_whatsapp_skipped { reason: 'wa_device_not_otomator' }
+otomator_alert_whatsapp_skipped { reason: 'wa_send_threw' }
+✔ foreign configured device cannot send; platform email gets the alert (4.3616ms)
+✔ fail closed: missing (0.3911ms)
+✔ fail closed: ambiguous (0.2974ms)
+✔ fail closed: error (0.3124ms)
+✔ fail closed: throws (0.5021ms)
+✔ fail closed: disconnected (0.2884ms)
+✔ fail closed: listen-only (0.2571ms)
+✔ fail closed: unknown-policy (0.3106ms)
+✔ foreign expected org cannot authorize its own device; empty config fails closed (0.4745ms)
+✔ healthy own device sends once; no email needed (0.6272ms)
+✔ transport exception falls back; both channels failing preserve reasons (15.828ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 68.9307
+Actual outage/recovery/validation entrypoints: foreign devices blocked, 3 platform emails, zero WA sends
+{"level":"warn","time":"2026-11-01T11:29:56.763Z","service":"whatsapp-service","msg":"JUMPSTART_SUPABASE_SERVICE_KEY not set — wa_devices heartbeat/reconcile/alerts disabled"}
+{"level":"warn","time":"2026-11-01T11:30:08.020Z","service":"whatsapp-service","msg":"SUPABASE_URL or SUPABASE_SERVICE_KEY not set — org validation unavailable"}
+{"level":"warn","time":"2026-11-01T11:30:14.643Z","service":"whatsapp-service","reason":"wa_device_not_otomator","msg":"Operational WhatsApp alert skipped"}
+{"level":"warn","time":"2026-11-01T11:30:14.644Z","service":"whatsapp-service","sessionKey":"down","name":"test","msg":"Outage WhatsApp skipped — no verified Otomator session"}
+{"level":"warn","time":"2026-11-01T11:30:14.687Z","service":"whatsapp-service","reason":"wa_device_not_otomator","msg":"Operational WhatsApp alert skipped"}
+{"level":"warn","time":"2026-11-01T11:30:14.687Z","service":"whatsapp-service","sessionKey":"down","msg":"Recovery WhatsApp skipped — no verified Otomator session; clearing alerted_at anyway"}
+{"level":"warn","time":"2026-11-01T11:30:14.688Z","service":"whatsapp-service","reason":"wa_device_not_otomator","msg":"Operational WhatsApp alert skipped"}
+{"level":"warn","time":"2026-11-01T11:30:14.688Z","service":"whatsapp-service","orgId":"customer","code":"SYNTHETIC_UNAVAILABLE","msg":"Org validation WhatsApp skipped — no verified Otomator session"}

@@ -92,17 +92,16 @@ export async function recordOrgValidationFailure(
     // Mark throttle before send so concurrent/repeat failures in-window do not double-alert.
     lastAlertAtByCode.set(code, now)
 
+    const text = `⚠️ WA service: אימות ארגון נכשל — ${orgId} — ${message}. חיבור מכשירים חסום.`
     const sender = await waDeviceMonitor.resolveAlertSender()
     if (!sender) {
       logger.warn(
         { orgId, code },
-        'Org validation alert suppressed — no healthy alerting session'
+        'Org validation WhatsApp skipped — no verified Otomator session'
       )
+      await waDeviceMonitor.sendAlertEmail(text)
       return
     }
-
-    const text =
-      `⚠️ WA service: אימות ארגון נכשל — ${orgId} — ${message}. חיבור מכשירים חסום.`
 
     const send =
       alertSendOverride ??
@@ -111,12 +110,12 @@ export async function recordOrgValidationFailure(
         return sendWhatsAppMessage(args)
       })
 
-    await send({
+    try { await send({
       orgId: sender,
       to: waDeviceMonitor.getAlertToPhone(),
       type: 'text',
       message: text,
-    })
+    }) } catch (error) { await waDeviceMonitor.sendAlertEmail(text); throw error }
     logger.info({ orgId, code, sender }, 'Org validation failure alert sent')
   } catch (err) {
     logger.warn({ err, orgId }, 'Failed to record/send org validation alert')
