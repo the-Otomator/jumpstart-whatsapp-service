@@ -1,3 +1,4 @@
+import { ALERT_ORG_ID, gateOtomatorAlert } from './otomatorAlertPolicy'
 import { listActiveSessions, getBaileysSocket } from '../sessionManager'
 import { isSocketOpen } from '../providers/baileys/baileysProvider'
 import { jumpstartSupabase } from './jumpstartSupabase'
@@ -10,7 +11,7 @@ const OUTAGE_ALERT_MS = Number(process.env.WA_OUTAGE_ALERT_MS ?? 10 * 60_000)
 const ALERT_TO = process.env.WA_ALERT_TO_PHONE ?? '972528393669'
 const ALERT_FROM =
   process.env.WA_ALERT_FROM_SESSION_KEY ??
-  'c3aa7a0d-461a-4ed4-882a-58bd063b1e62-d1fde265'
+  'c3aa7a0d-461a-4ed4-882a-58bd063b1e62__84920ad6'
 
 /** Default on. Set WA_SESSION_ALERTS=0|false|off to disable. */
 export function alertsEnabled(): boolean {
@@ -18,26 +19,31 @@ export function alertsEnabled(): boolean {
   return !(v === '0' || v === 'false' || v === 'off' || v === 'no')
 }
 
-/**
- * Pick a healthy connected session to send operational alerts from.
- * Prefer WA_ALERT_FROM_SESSION_KEY when it is up; otherwise any other connected session.
- * Pass excludeSessionKey to avoid using a known-down session as the sender.
- */
+/** Only the configured, DB-verified Otomator session may send staff alerts. */
 export async function resolveAlertSender(excludeSessionKey?: string): Promise<string | null> {
-  if (!excludeSessionKey || ALERT_FROM !== excludeSessionKey) {
-    const fromStatus = listActiveSessions().find((s) => s.orgId === ALERT_FROM)
-    if (fromStatus?.status === 'connected' && isSocketOpen(getBaileysSocket(ALERT_FROM))) {
-      return ALERT_FROM
-    }
+  const gate = await gateOtomatorAlert(jumpstartSupabase, ALERT_FROM, ALERT_ORG_ID)
+  if (!gate.ok) {
+    logger.warn({ reason: gate.reason }, 'Operational WhatsApp alert skipped')
+    return null
   }
+  if (ALERT_FROM === excludeSessionKey) return null
+  const session = listActiveSessions().find(s => s.orgId === ALERT_FROM)
+  return session?.status === 'connected' && isSocketOpen(getBaileysSocket(ALERT_FROM)) ? ALERT_FROM : null
+}
 
-  const fallback = listActiveSessions().find(
-    (s) =>
-      s.orgId !== excludeSessionKey &&
-      s.status === 'connected' &&
-      isSocketOpen(getBaileysSocket(s.orgId))
-  )
-  return fallback?.orgId ?? null
+/** Email uses only the platform credential and sender. Missing configuration fails closed. */
+export async function sendAlertEmail(text: string): Promise<boolean> {
+  const key = process.env.RESEND_API_KEY
+  if (!key) { logger.warn({ reason: 'platform_email_not_configured' }, 'Operational alert email skipped'); return false }
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST', signal: AbortSignal.timeout(10_000),
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: 'JumpStart <noreply@jumpstart.co.il>', to: ['nizan@otomator.co.il'], subject: 'JumpStart · WhatsApp service alert', text }),
+    })
+    if (!res.ok) logger.warn({ reason: `email_http_${res.status}` }, 'Operational alert email failed')
+    return res.ok
+  } catch { logger.warn({ reason: 'email_send_threw' }, 'Operational alert email failed'); return false }
 }
 
 export function getAlertToPhone(): string {
@@ -161,7 +167,7 @@ async function processOutageAlerts(liveKeys: string[]): Promise<void> {
   }
 }
 
-async function sendOutageAlert(row: WaDeviceRow, durationMs: number): Promise<void> {
+export async function sendOutageAlert(row: WaDeviceRow, durationMs: number): Promise<void> {
   const mins = Math.round(durationMs / 60_000)
   const text =
     `⚠️ WA session down\n` +
@@ -175,8 +181,10 @@ async function sendOutageAlert(row: WaDeviceRow, durationMs: number): Promise<vo
   if (!sender) {
     logger.warn(
       { sessionKey: row.session_key, name: row.name },
-      'Outage alert suppressed — no healthy alerting session'
+      'Outage WhatsApp skipped — no verified Otomator session'
     )
+    if (await sendAlertEmail(text)) await jumpstartSupabase!.from('wa_devices')
+      .update({ alerted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', row.id)
     return
   }
 
@@ -196,10 +204,12 @@ async function sendOutageAlert(row: WaDeviceRow, durationMs: number): Promise<vo
     logger.info({ sessionKey: row.session_key, sender }, 'Outage alert sent')
   } catch (err) {
     logger.warn({ err, sessionKey: row.session_key }, 'Failed to send outage alert')
+    if (await sendAlertEmail(text)) await jumpstartSupabase!.from('wa_devices')
+      .update({ alerted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', row.id)
   }
 }
 
-async function sendRecoveryAndClear(row: WaDeviceRow): Promise<void> {
+export async function sendRecoveryAndClear(row: WaDeviceRow): Promise<void> {
   const text =
     `✅ WA session back up\n` +
     `Device: ${row.name}\n` +
@@ -210,8 +220,9 @@ async function sendRecoveryAndClear(row: WaDeviceRow): Promise<void> {
   if (!sender) {
     logger.warn(
       { sessionKey: row.session_key },
-      'Recovery alert suppressed — no healthy alerting session; clearing alerted_at anyway'
+      'Recovery WhatsApp skipped — no verified Otomator session; clearing alerted_at anyway'
     )
+    await sendAlertEmail(text)
   } else {
     try {
       const { sendWhatsAppMessage } = await import('../routes/messages')
@@ -224,6 +235,7 @@ async function sendRecoveryAndClear(row: WaDeviceRow): Promise<void> {
       logger.info({ sessionKey: row.session_key, sender }, 'Recovery alert sent')
     } catch (err) {
       logger.warn({ err, sessionKey: row.session_key }, 'Failed to send recovery alert')
+      await sendAlertEmail(text)
     }
   }
 
