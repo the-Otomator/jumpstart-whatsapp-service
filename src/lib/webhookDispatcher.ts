@@ -160,9 +160,9 @@ export function buildWebhookHeaders(
   }
 
   if (isJumpstartInboundWebhookPath(url) && mayAttachWebhookSecret(parsed)) {
-    const hasQuerySecret = parsed.searchParams.has('secret')
+    // Hub requires the relay credential even when a device query secret exists.
     const secret = process.env.WA_INCOMING_SECRET ?? ''
-    if (!hasQuerySecret && secret) {
+    if (secret) {
       headers['Authorization'] = `Bearer ${secret}`
       headers['x-webhook-secret'] = secret
     }
