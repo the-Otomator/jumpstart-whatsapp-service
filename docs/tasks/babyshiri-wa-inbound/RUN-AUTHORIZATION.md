@@ -1,0 +1,1 @@
+Source: _tasks/babyshiri-next-run-1103/TASK.md, explicitly invoked by Nizan in this chat. Execute sequentially to PR + staging + emergency queue submission when DDL exists. No production merge or deployment is implied by ready_for_cowork. Only the explicitly scoped staff invite messages are authorized; historical replay must not emit automations or replies.

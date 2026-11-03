@@ -131,6 +131,11 @@ function testHeadersAndUrlSanitization(): void {
     assert.strictEqual(allowedHeaders.Authorization, 'Bearer non-production-test-value')
     assert.strictEqual(allowedHeaders['x-webhook-secret'], 'non-production-test-value')
 
+    const allowedQueryHeaders = buildWebhookHeaders(`${ALLOWED_URL}?secret=device-specific`, { orgId: ORG })
+    assert.strictEqual(allowedQueryHeaders.Authorization, 'Bearer non-production-test-value')
+    assert.strictEqual(allowedQueryHeaders['x-webhook-secret'], 'non-production-test-value')
+    assert.strictEqual(allowedQueryHeaders['x-wa-session-key'], ORG)
+
     // Two connected Baileys devices in one org must send *their own* session_key,
     // not the bare organization UUID. Exact match on wa-webhook depends on this.
     const org = 'c3aa7a0d-461a-4ed4-882a-58bd063b1e62'
@@ -172,9 +177,15 @@ function testHeadersAndUrlSanitization(): void {
 
 async function testDispatchRecombinesRegistrySecret(): Promise<void> {
   const sessionKey = 'wm-dispatch-secret-test'
+  const previousSecret = process.env.WA_INCOMING_SECRET
+  process.env.WA_INCOMING_SECRET = 'relay-regression-fixture'
   const requestedUrls: string[] = []
-  const fetchImpl = (async (input: string | URL | Request) => {
+  const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
     requestedUrls.push(String(input))
+    const headers = new Headers(init?.headers)
+    assert.strictEqual(headers.get('x-webhook-secret'), 'relay-regression-fixture')
+    assert.strictEqual(headers.get('authorization'), 'Bearer relay-regression-fixture')
+    assert.strictEqual(headers.get('x-wa-session-key'), sessionKey)
     return response(200)
   }) as typeof fetch
 
@@ -191,6 +202,8 @@ async function testDispatchRecombinesRegistrySecret(): Promise<void> {
     assert.strictEqual(dispatched.searchParams.get('x'), '1')
   } finally {
     clearSessionWebhookSecret(sessionKey)
+    if (previousSecret === undefined) delete process.env.WA_INCOMING_SECRET
+    else process.env.WA_INCOMING_SECRET = previousSecret
   }
 }
 
