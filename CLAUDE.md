@@ -1,5 +1,11 @@
 # Jumpstart WhatsApp Service
 
+## Knowledge & decisions → otomator-dev
+Plans, screens, decisions, active work and the release log for all Otomator systems live in the private repo
+`the-Otomator/otomator-dev` (local: `C:\Users\Me\projects\otomator-dev`). Before planning or changing behaviour,
+read its `INDEX.md`, then `decisions/areas/<feature>.md` and `work/<topic>/STATE.md` for the topic.
+When you finish a milestone, update `work/<topic>/STATE.md` there. Never put handouts or secrets in this code repo.
+
 <!-- COWORK-EXEC-CONTRACT v2 — RELEASE WINDOWS (canonical text, identical in every repo) -->
 ## Release windows — production changes only at night
 
