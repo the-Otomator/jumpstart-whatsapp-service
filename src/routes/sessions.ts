@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express'
+import { getBaileysSocket } from '../sessionManager'
+import { isSocketOpen } from '../providers/baileys/baileysProvider'
 import {
   startSession,
   migrateSession,
@@ -357,7 +359,8 @@ router.get(
       return
     }
     res.json({
-      status: session.status,
+      status: session.provider === 'baileys' && session.status === 'connected' &&
+        !isSocketOpen(getBaileysSocket(orgId)) ? 'disconnected' : session.status,
       qr: session.qr ?? null,
       phoneNumber: session.phoneNumber ?? null,
       provider: session.provider,
