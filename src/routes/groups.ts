@@ -1,5 +1,6 @@
 ﻿import { Router, Request, Response } from 'express'
 import { assertDeviceCanSend } from '../lib/deviceSendPolicy'
+import { assertPaymentAllowsSend, PaymentRestrictedError } from '../lib/paymentRestriction'
 import { getBaileysSocket, getStatus } from '../sessionManager'
 import {
   validateBody,
@@ -308,10 +309,15 @@ router.post(
       }
 
       await assertDeviceCanSend(orgId)
+      await assertPaymentAllowsSend(orgId)
       const result = await sock.sendMessage(groupJid, content)
       log.info({ groupJid, messageId: result?.key?.id }, 'Message sent to group')
       res.json({ success: true, messageId: result?.key?.id ?? '' })
     } catch (err) {
+      if (err instanceof PaymentRestrictedError) {
+        res.status(423).json({ error: 'restricted', code: 'PAYMENT_RESTRICTED' })
+        return
+      }
       log.error({ groupJid, err: (err as Error).message }, 'Failed to send group message')
       res.status(500).json({ error: (err as Error).message, code: 'GROUP_SEND_FAILED' })
     }

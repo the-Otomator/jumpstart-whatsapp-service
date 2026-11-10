@@ -3,6 +3,7 @@ import { orgLogger } from '../lib/logger'
 import { loadSessionMeta } from '../lib/sessionStore'
 import { postWebhook } from '../lib/webhookDispatcher'
 import { sendWhatsAppMessageDirect } from '../lib/sendDirect'
+import { assertPaymentAllowsSend, PaymentRestrictedError } from '../lib/paymentRestriction'
 import { WA_ENQUEUE_CEILING_MS, WA_SEND_TIMEOUT_MS, withTimeout } from '../lib/withTimeout'
 import { getProviderForOrg, getMetaCloudProvider } from '../providers'
 import { isOfficialOtp, OTP_SEND_BUDGET_MS } from '../lib/officialOtp'
@@ -32,6 +33,7 @@ import type {
 } from './types'
 
 const pools = new Map<string, SenderPool>()
+const PAYMENT_HOLD_RECHECK_MS = 30_000
 
 export function getSenderPool(orgId: string): SenderPool {
   let pool = pools.get(orgId)
@@ -111,6 +113,7 @@ export class SenderPool {
       }
 
       const ceilingTimer = setTimeout(() => {
+        job.cancelled = true
         this.removeQueuedJob(job.id, lane)
         orgLogger(this.orgId).warn(
           { jobId: job.id, ceilingMs: WA_ENQUEUE_CEILING_MS },
@@ -144,6 +147,8 @@ export class SenderPool {
             this.resume()
           }
           // Call the Meta provider explicitly: never select another provider.
+          await assertPaymentAllowsSend(this.orgId)
+          if (controller.signal.aborted) throw new Error('send_timeout')
           return (await provider.sendMessage({ ...req, signal: controller.signal })).messageId
         })(),
         OTP_SEND_BUDGET_MS,
@@ -153,6 +158,7 @@ export class SenderPool {
       orgLogger(this.orgId).info({ elapsedMs: Date.now() - started, messageId: result }, 'Official OTP provider accepted')
       return result
     } catch (err) {
+      if (err instanceof PaymentRestrictedError) throw err
       this.onSendFailure((err as Error).message)
       orgLogger(this.orgId).error({ elapsedMs: Date.now() - started, code: 'OTP_SEND_FAILED' }, 'Official OTP operational send failed')
       throw err
@@ -169,6 +175,7 @@ export class SenderPool {
       req,
       lane,
       enqueuedAt: Date.now(),
+      retainedByService: true,
       resolve: () => {},
       reject: () => {},
     }
@@ -212,17 +219,18 @@ export class SenderPool {
     this.scheduleProcess()
   }
 
-  private scheduleProcess(): void {
+  private scheduleProcess(delay = 0): void {
     if (this.processorTimer) return
     this.processorTimer = setTimeout(() => {
       this.processorTimer = null
       void this.processQueue()
-    }, 0)
+    }, delay)
   }
 
   private async processQueue(): Promise<void> {
     if (this.processing) return
     this.processing = true
+    let nextDelay = 0
 
     try {
       while (true) {
@@ -250,6 +258,8 @@ export class SenderPool {
         }
 
         try {
+          await assertPaymentAllowsSend(job.req.orgId)
+          if (job.cancelled) continue
           const messageId = await withTimeout(
             sendWhatsAppMessageDirect(job.req),
             WA_SEND_TIMEOUT_MS,
@@ -258,6 +268,16 @@ export class SenderPool {
           this.onSendSuccess(job.lane)
           job.resolve(messageId)
         } catch (err) {
+          if (err instanceof PaymentRestrictedError) {
+            if (job.retainedByService) {
+              this.requeueFront(job)
+              nextDelay = PAYMENT_HOLD_RECHECK_MS
+              break
+            }
+            // Synchronous callers own the message and can retry their existing outbox item.
+            job.reject(err)
+            continue
+          }
           const msg = (err as Error).message
           if (msg === 'send_timeout') {
             orgLogger(this.orgId).warn(
@@ -278,7 +298,7 @@ export class SenderPool {
         !this.state.paused &&
         (this.operationalQueue.length > 0 || this.marketingQueue.length > 0)
       ) {
-        this.scheduleProcess()
+        this.scheduleProcess(nextDelay)
       }
     }
   }
