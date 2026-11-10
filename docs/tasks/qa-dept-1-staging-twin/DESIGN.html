@@ -1,0 +1,203 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>מחלקת QA — מסכים</title>
+<style>
+:root{--bg:#0f1117;--side:#1a1d27;--card:#252836;--acc:#6366f1;--line:#343849;--mut:#9aa0b4;--g:#34d399;--gbg:rgba(16,185,129,.15);--r:#f87171;--rbg:rgba(239,68,68,.15);--y:#fbbf24;--ybg:rgba(245,158,11,.15)}
+*{box-sizing:border-box}body{margin:0;background:#e9e8e3;color:#1d1d1b;font:15px/1.55 -apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:24px 16px 70px}
+h1{margin:0 0 4px;font-size:26px}.lead{color:#5d5c57;margin:0 0 18px}
+nav{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 22px;position:sticky;top:0;background:#e9e8e3;padding:8px 0;z-index:5}
+nav a{background:#fff;border:1px solid #d5d3cc;border-radius:999px;padding:4px 12px;color:#1d1d1b;text-decoration:none;font-size:14px}
+section{margin:0 0 42px}.sh{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}.sh h2{margin:0;font-size:19px}.sh span{color:#6b6a64;font-size:14px}
+.frame{border-radius:12px;overflow:hidden;box-shadow:0 8px 28px rgba(0,0,0,.18);border:1px solid #c9c7bf}
+.bar{background:#d9d7d0;padding:7px 12px;font-size:12px;color:#555;direction:ltr;text-align:left;font-family:ui-monospace,monospace}
+/* admin */
+.adm{display:flex;background:var(--bg);color:#fff;min-height:420px}
+.side{width:200px;background:var(--side);padding:14px 10px;flex-shrink:0;font-size:13px}
+.side .grp{color:#6b7190;font-size:11px;margin:14px 8px 4px}.side .it{padding:7px 10px;border-radius:8px;color:#c8cbe0}.side .on{background:rgba(99,102,241,.18);color:#fff}
+.main{flex:1;padding:18px 20px;min-width:0}
+.ttl{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}.ttl h3{margin:0;font-size:18px}
+.card{background:var(--card);border-radius:12px;padding:14px;margin-bottom:12px}
+.row{display:grid;grid-template-columns:1.6fr .8fr 1fr 1fr auto;gap:10px;align-items:center;padding:10px 6px;border-bottom:1px solid var(--line);font-size:13.5px}
+.row.h{color:var(--mut);font-size:12px}.row:last-child{border-bottom:0}
+.pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600;white-space:nowrap}
+.pg{background:var(--gbg);color:var(--g)}.pr{background:var(--rbg);color:var(--r)}.py{background:var(--ybg);color:var(--y)}.pn{background:rgba(255,255,255,.08);color:#b9bdd0}.pi{background:rgba(99,102,241,.2);color:#c7c9ff}
+.btn{border:0;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;color:#fff;background:var(--acc);cursor:default}
+.btn.em{background:#059669}.btn.dis{opacity:.35}.btn.gh{background:transparent;border:1px solid var(--line);color:#c8cbe0}.btn.red{background:#dc2626}
+.mut{color:var(--mut)}.sm{font-size:12px}.mono{font-family:ui-monospace,monospace;direction:ltr;display:inline-block}
+.tip{position:relative;display:inline-block}.tip .t{position:absolute;bottom:115%;left:0;background:#000;color:#fff;font-size:12px;padding:6px 9px;border-radius:6px;white-space:nowrap}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.kpi{background:var(--card);border-radius:12px;padding:12px}.kpi b{display:block;font-size:22px;margin-top:2px}
+.j{display:grid;grid-template-columns:22px 1fr auto auto;gap:10px;align-items:center;padding:8px 4px;border-bottom:1px solid var(--line);font-size:13.5px}
+.ok{color:var(--g)}.x{color:var(--r)}
+.fail{background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.35);border-radius:10px;padding:12px;margin:10px 0}
+.shot{background:#fff;border-radius:8px;height:150px;position:relative;overflow:hidden;color:#222}
+.shot .hl{position:absolute;border:2px solid #ef4444;border-radius:6px}
+.steps{font-size:13px;margin:8px 0 0;padding-inline-start:18px}.steps li.bad{color:var(--r)}
+.sink{width:100%;border-collapse:collapse;font-size:13px}.sink td,.sink th{padding:7px 6px;border-bottom:1px solid var(--line);text-align:right;vertical-align:top}.sink th{color:var(--mut);font-weight:500;font-size:12px}
+.modal-bg{background:rgba(0,0,0,.55);padding:40px 16px;display:flex;justify-content:center}
+.modal{background:var(--card);border-radius:14px;width:520px;max-width:100%;padding:18px;color:#fff}
+.prog{height:8px;background:#1a1d27;border-radius:99px;overflow:hidden;margin:8px 0}.prog i{display:block;height:100%;background:var(--acc)}
+/* hub */
+.hub{background:#f6f7fb;color:#1c1f2a;min-height:380px}
+.banner{background:#c2410c;color:#fff;text-align:center;font-weight:600;font-size:14px;padding:7px 10px}
+.hubtop{display:flex;justify-content:space-between;align-items:center;padding:10px 18px;background:#fff;border-bottom:1px solid #e6e8ef}
+.hubbody{display:grid;grid-template-columns:200px 1fr;min-height:320px}
+.hubside{background:#fff;border-left:1px solid #e6e8ef;padding:12px;font-size:13px}.hubside div{padding:6px 8px;border-radius:7px}.hubside .on{background:#eef0ff;color:#4338ca;font-weight:600}
+.hubmain{padding:16px}.hc{background:#fff;border:1px solid #e6e8ef;border-radius:12px;padding:12px;margin-bottom:10px}
+.kid{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f0f1f5;font-size:14px}
+.chk{width:22px;height:22px;border-radius:6px;border:2px solid #c7cad6;display:inline-block}.chk.on{background:#10b981;border-color:#10b981}
+.phone{width:300px;border-radius:28px;border:8px solid #111;overflow:hidden;background:#f6f7fb;margin:0 auto}
+.two{display:grid;grid-template-columns:1fr 320px;gap:18px;align-items:start}
+.note{background:#fff;border:1px solid #d5d3cc;border-radius:10px;padding:10px 14px;margin-top:10px;font-size:14px}
+@media(max-width:860px){.two{grid-template-columns:1fr}.side{display:none}.row{grid-template-columns:1fr 1fr}.row.h{display:none}.kpis{grid-template-columns:1fr 1fr}.hubbody{grid-template-columns:1fr}.hubside{display:none}}
+</style></head><body><div class="wrap">
+<h1>מחלקת QA — מסכים</h1>
+<p class="lead">משימת עבודה: <b>מחלקת QA</b> · Q1+Q2 · באדמין בעיצוב של האדמין, וב-Hub ה-staging · כל הנתונים בדוגמאות בדויים</p><div style="display:inline-block;background:#e3f2ec;color:#0f6b5c;border:1px solid #9fd3c3;border-radius:8px;padding:4px 12px;font-weight:700;margin:0 0 14px">✓ מסכים 1–7 אושרו ע״י ניצן 10.11.2026 · מצבים וטלפון (סעיף 8) לפי הכללים</div>
+<nav><a href="#s1">1 · Hub בסביבת בדיקה</a><a href="#s2">2 · תור שחרורים + QA</a><a href="#s3">3 · דוח ריצה שנכשלה</a><a href="#s4">4 · שחרור חירום</a><a href="#s5">5 · תאום פרודקשן לילי</a><a href="#s6">6 · בדיקת פרודקשן אחרי עלייה</a><a href="#s7">7 · בריאות QA</a><a href="#s8">8 · מצבים + טלפון</a></nav>
+
+<!-- 1 -->
+<section id="s1"><div class="sh"><h2>1 · ה-Hub בסביבת הבדיקה</h2><span>staging.hub.jumpstart.co.il · נכנסים כמדריכה של תאום תנועטף</span></div>
+<div class="two">
+<div class="frame"><div class="bar">https://staging.hub.jumpstart.co.il/workforce/today</div><div class="hub">
+<div class="banner">סביבת בדיקה · נתונים בדויים · הודעות נשלחות רק לניצן · תשלומים במסוף בדיקה</div>
+<div class="hubtop"><b>תנועטף <span style="color:#9aa">(תאום)</span></b><span style="font-size:13px;color:#667">מיכל לוי · מדריכה</span></div>
+<div class="hubbody"><div class="hubside"><div class="on">היום שלי</div><div>החוגים שלי</div><div>הסכם</div><div>פרופיל</div></div>
+<div class="hubmain"><div class="hc"><b>שלישי 10.11 · חוג התעמלות קרקע גילאי 6–8</b><div style="color:#667;font-size:13px">16:30–17:15 · סניף רמת גן · 9 ילדים</div></div>
+<div class="hc"><div class="kid"><span>נועה ברק</span><span class="chk on"></span></div><div class="kid"><span>איתי שמש</span><span class="chk on"></span></div><div class="kid"><span>שירה אלון</span><span class="chk"></span></div><div class="kid"><span>יואב כהן</span><span class="chk on"></span></div>
+<div style="text-align:left;margin-top:10px"><span style="background:#4f46e5;color:#fff;border-radius:8px;padding:6px 14px;font-size:13px">שמירת נוכחות</span></div></div></div></div></div></div>
+<div><div class="phone"><div class="banner" style="font-size:12px">סביבת בדיקה · נתונים בדויים</div>
+<div style="padding:14px"><div style="font-weight:700;margin-bottom:6px">בייבי שירי <span style="color:#9aa">(תאום)</span></div><div style="font-size:13px;color:#667;margin-bottom:10px">שלום, דנה · המנוי שלך פעיל</div>
+<div class="hc"><b style="font-size:14px">רביעי 11.11 · 10:00</b><div style="font-size:13px;color:#667">מפגש תנועה לתינוקות · 3 מקומות</div><div style="margin-top:8px;background:#4f46e5;color:#fff;border-radius:8px;padding:6px;text-align:center;font-size:13px">להרשמה</div></div>
+<div class="hc" style="font-size:13px">חשבונית 10023 · ₪290 · שולם</div></div></div>
+<p style="text-align:center;font-size:13px;color:#6b6a64">פורטל לקוח בטלפון · אותו באנר, מקוצר</p></div>
+</div>
+<div class="note">הבאנר תמיד מופיע ב-staging, אי אפשר לסגור אותו, ובפרודקשן הוא לא קיים. השמות בדויים; כל הודעה נשלחת בפועל רק לטלפון/מייל של ניצן, עם תחילית [QA · שם העסק]. המבנה, החוגים, המחירים ושעות הפעילות זהים לפרודקשן.</div></section>
+
+<!-- 2 -->
+<section id="s2"><div class="sh"><h2>2 · תור השחרורים באדמין — עם תג QA</h2><span>admin › מחלקת פיתוח › תור שחרורים</span></div>
+<div class="frame"><div class="bar">https://otomator-admin.pages.dev/dev/releases</div><div class="adm">
+<div class="side"><div class="grp">מחלקת פיתוח</div><div class="it">צריך אותך</div><div class="it">משימות</div><div class="it on">תור שחרורים</div><div class="it">תור מיגרציות</div><div class="grp">איכות</div><div class="it">ריצות QA</div><div class="it">תאום פרודקשן</div></div>
+<div class="main"><div class="ttl"><h3>תור שחרורים · Hub</h3><div style="display:flex;gap:8px;align-items:center"><span class="pill pi">staging <span class="mono">a91f3c2</span></span><span class="pill pg">QA עבר · 47/47</span><button class="btn">קידום לפרודקשן בחלון הלילה</button></div></div>
+<div class="card"><div class="row h"><div>פריט</div><div>PR</div><div>ב-staging</div><div>QA</div><div></div></div>
+<div class="row"><div>שליחה מחדש לפי בחירה בתור הודעות<div class="sm mut">תנועטף · תור הודעות</div></div><div class="mono">#4012</div><div class="sm">כן · 14:20</div><div><span class="pill pg">QA עבר</span></div><div><button class="btn gh">דוח</button></div></div>
+<div class="row"><div>מסך לידים — סינון "ללא Meta"<div class="sm mut">בייבי שירי · לידים</div></div><div class="mono">#4018</div><div class="sm">כן · 15:02</div><div><span class="pill py">QA רץ · 31/47</span></div><div><button class="btn gh">צפייה</button></div></div>
+<div class="row"><div>חיוב מנוי במחיר מלא<div class="sm mut">בייבי שירי · מנויים</div></div><div class="mono">#4021</div><div class="sm">כן · 15:40</div><div><span class="pill pr">QA נכשל · 2 מסלולים</span></div><div><span class="tip"><span class="t">אי אפשר לעלות לפרודקשן — QA נכשל</span><button class="btn dis">קידום</button></span></div></div>
+<div class="row"><div>תצוגת קישור עם לוגו העסק<div class="sm mut">כללי · פורטל</div></div><div class="mono">#4025</div><div class="sm">ממתין</div><div><span class="pill pn">QA לא הורץ</span></div><div></div></div>
+<div class="row"><div>התראה על ניתוק וואטסאפ<div class="sm mut">כללי · WhatsApp</div></div><div class="mono">#4027</div><div class="sm">כן · 16:05</div><div><span class="pill pr">QA לא הצליח לרוץ</span></div><div><button class="btn gh">הרץ שוב</button></div></div>
+</div>
+<div class="sm mut">כש-QA נכשל, הפריט חוזר אוטומטית לסוכן עם הדוח, ולא מגיע אליך. "QA לא הצליח לרוץ" נחשב כשלון, ולכן לא עולה לפרודקשן.</div>
+</div></div></div></section>
+
+<!-- 3 -->
+<section id="s3"><div class="sh"><h2>3 · דוח ריצת QA שנכשלה</h2><span>לחיצה על "QA נכשל"</span></div>
+<div class="frame"><div class="bar">https://otomator-admin.pages.dev/dev/qa/runs/1187</div><div class="adm"><div class="side"><div class="grp">איכות</div><div class="it on">ריצות QA</div><div class="it">תאום פרודקשן</div></div>
+<div class="main"><div class="ttl"><h3>ריצה 1187 · חבילה מלאה · <span class="mono">c40e7b1</span></h3><span class="pill pr">נכשל · 45/47</span></div>
+<div class="kpis"><div class="kpi"><span class="sm mut">משך</span><b>38 דק'</b></div><div class="kpi"><span class="sm mut">מסלולים</span><b>47</b></div><div class="kpi"><span class="sm mut">נכשלו</span><b style="color:var(--r)">2</b></div><div class="kpi"><span class="sm mut">הודעות שנמסרו לניצן</span><b>23</b></div></div>
+<div class="card"><b style="font-size:14px">לפי תפקיד</b>
+<div class="j"><span class="ok">✓</span><span>לקוח קצה — כניסה לפורטל, הזמנה, חשבונית</span><span class="sm mut">6/6</span><span class="sm mut">2:10</span></div>
+<div class="j"><span class="ok">✓</span><span>מדריכה — מסך היום, סימון נוכחות</span><span class="sm mut">4/4</span><span class="sm mut">1:05</span></div>
+<div class="j"><span class="x">✗</span><span>מבקר ציבורי — הרשמה למנוי + תשלום SUMIT בדיקה</span><span class="sm mut">5/6</span><span class="sm mut">3:40</span></div>
+<div class="j"><span class="x">✗</span><span>עובד — תור הודעות ושליחה מחדש</span><span class="sm mut">7/8</span><span class="sm mut">4:12</span></div>
+<div class="j"><span class="ok">✓</span><span>בעל עסק — אפליקציות לפי רישיון, דוחות</span><span class="sm mut">23/23</span><span class="sm mut">27:00</span></div></div>
+<div class="fail"><b class="x">✗ הרשמה למנוי בייבי שירי — הסכום בחשבונית לא תואם</b>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">
+<div class="shot"><div style="padding:12px;font-size:13px"><b>תודה, ההרשמה הושלמה</b><br>מנוי חודשי · מועדון האמהות<br><br>סכום ששולם: ₪145<br>חידוש: 10.12.2026</div><div class="hl" style="top:78px;right:8px;width:130px;height:24px"></div></div>
+<ol class="steps"><li>פתיחת /club בתאום בייבי שירי</li><li>מילוי פרטים כמבקר</li><li>תשלום בכרטיס בדיקה SUMIT</li><li class="bad">צפוי ₪290 (מחיר מלא, לפי ההחלטה מ-10.11) · התקבל ₪145</li></ol></div>
+<div class="sm mut" style="margin-top:8px">נגרם כנראה ע״י PR #4021 · trace · וידאו · <span style="color:#c7c9ff">נפתחה קריאה לסוכן</span></div></div>
+<div class="card"><b style="font-size:14px">הודעות שנשלחו בריצה — כולן לטלפון של ניצן</b>
+<table class="sink"><tr><th>ערוץ</th><th>אוטומציה</th><th>נמען מקורי → נשלח אל</th><th>תוכן</th><th>בדיקה</th></tr>
+<tr><td>WhatsApp</td><td>יום הולדת</td><td class="mono">0142 → 052-839-3669</td><td>[QA · תנועטף] מזל טוב לנועה! ...</td><td class="ok">✓ נמסר · שם פרטי בלבד</td></tr>
+<tr><td>מייל</td><td>אישור הרשמה</td><td class="mono">a81f → nizan+qa-babyshiri@</td><td>ההרשמה שלך למועדון האמהות ...</td><td class="ok">✓</td></tr>
+<tr><td>WhatsApp</td><td>שליחה מחדש</td><td class="mono">0388 → 052-839-3669</td><td>—</td><td class="x">✗ לא נוצרה הודעה</td></tr></table></div>
+</div></div></div></section>
+
+<!-- 4 -->
+<section id="s4"><div class="sh"><h2>4 · שחרור חירום — חבילה קריטית לפני פרודקשן</h2><span>כפתור "שחרור חירום" ב"צריך אותך"</span></div>
+<div class="frame"><div class="bar">otomator-admin › צריך אותך › שחרור חירום</div><div class="adm" style="min-height:0;display:block"><div class="modal-bg"><div class="modal">
+<h3 style="margin:0 0 4px">שחרור חירום · תיקון ניתוק וואטסאפ בלילה</h3><div class="sm mut">PR #4031 · מאושר על ידך כחירום · מחוץ לחלון</div>
+<div style="margin:14px 0 4px;font-size:13px">בודק חבילה קריטית ב-staging · 6:40 מתוך כ-9 דק'</div><div class="prog"><i style="width:72%"></i></div>
+<div class="j"><span class="ok">✓</span><span>כניסה — בעל עסק, עובד, מדריכה, לקוח</span><span></span><span class="sm mut">1:20</span></div>
+<div class="j"><span class="ok">✓</span><span>כניסת לקוח לפורטל + הזמנה</span><span></span><span class="sm mut">1:05</span></div>
+<div class="j"><span class="ok">✓</span><span>מדריכה מסמנת נוכחות</span><span></span><span class="sm mut">0:50</span></div>
+<div class="j"><span class="ok">✓</span><span>הרשמה + תשלום SUMIT בדיקה</span><span></span><span class="sm mut">2:30</span></div>
+<div class="j"><span class="py pill" style="padding:0 6px">…</span><span>אוטומציה לכל ערוץ → נמסרה לניצן</span><span></span><span></span></div>
+<div style="display:flex;gap:8px;justify-content:flex-start;margin-top:14px"><button class="btn em dis">עלייה לפרודקשן (נפתח כשהבדיקה עוברת)</button><button class="btn gh">ביטול</button></div>
+<div class="sm mut" style="margin-top:10px">אם החבילה עוברת, העלייה לפרודקשן נעשית אוטומטית: מיזוג, Edge, frontend ובדיקה חיה. אם היא נכשלת, השחרור נעצר והדוח חוזר לסוכן.</div>
+</div></div></div></div></section>
+
+<!-- 5 -->
+<section id="s5"><div class="sh"><h2>5 · תאום פרודקשן — ריענון לילי</h2><span>admin › איכות › תאום פרודקשן</span></div>
+<div class="frame"><div class="bar">https://otomator-admin.pages.dev/dev/qa/twin</div><div class="adm"><div class="side"><div class="grp">איכות</div><div class="it">ריצות QA</div><div class="it on">תאום פרודקשן</div></div>
+<div class="main"><div class="ttl"><h3>תאום פרודקשן ב-Staging</h3><span class="pill pg">עודכן הלילה 02:14 · תקין</span></div>
+<div class="kpis"><div class="kpi"><span class="sm mut">ארגונים</span><b>38 / 38</b></div><div class="kpi"><span class="sm mut">אנשי קשר</span><b>41,207</b></div><div class="kpi"><span class="sm mut">טבלאות שהועתקו</span><b>1,495</b></div><div class="kpi"><span class="sm mut">משך</span><b>22 דק'</b></div></div>
+<div class="card"><b style="font-size:14px">בדיקות בטיחות — חייבות להיות 0</b>
+<div class="j"><span class="ok">✓</span><span>טלפונים אמיתיים מחוץ לרשימה המותרת</span><b>0</b><span></span></div>
+<div class="j"><span class="ok">✓</span><span>מיילים אמיתיים מחוץ לרשימה המותרת</span><b>0</b><span></span></div>
+<div class="j"><span class="ok">✓</span><span>טוקנים של כרטיסים / מפתחות ספקים</span><b>0</b><span></span></div>
+<div class="j"><span class="ok">✓</span><span>כתובות פרודקשן בפונקציות / Cron</span><b>0</b><span></span></div>
+<div class="j"><span class="ok">✓</span><span>הודעות שנשלחו למישהו שאינו ניצן (24 שעות)</span><b>0</b><span></span></div>
+<div class="sm mut" style="margin-top:8px">כל הודעה ב-Staging נשלחת בפועל לטלפון שלך (052-839-3669) או ל-nizan+qa-…@otomator.co.il, מהמכשיר של Otomator בלבד. כל יעד אחר נחסם בקוד. תשלומים: מסוף בדיקה של SUMIT בלבד.</div></div>
+</div></div></div></section>
+
+<!-- 6 -->
+<section id="s6"><div class="sh"><h2>6 · בדיקת פרודקשן אוטומטית אחרי עלייה</h2><span>מופיעה בפריט השחרור, 10 דק' אחרי העלייה</span></div>
+<div class="frame"><div class="bar">otomator-admin › תור שחרורים › שחרור 10.11 23:40</div><div class="adm" style="min-height:0"><div class="main">
+<div class="card"><div class="ttl" style="margin:0 0 8px"><b>פרודקשן · <span class="mono">a91f3c2</span> · עלה 23:40</b><span class="pill pg">בדיקת פרודקשן עברה · 6/6</span></div>
+<div class="j"><span class="ok">✓</span><span>hub.jumpstart.co.il — כניסה נטענת, גרסה חדשה</span><span></span><span class="sm mut">200</span></div>
+<div class="j"><span class="ok">✓</span><span>כניסה כניצן בארגון Otomator — דשבורד בלי שגיאות</span><span></span><span class="sm mut">קריאה בלבד</span></div>
+<div class="j"><span class="ok">✓</span><span>עמוד כניסה לפורטל לקוחות</span><span></span><span class="sm mut">200</span></div>
+<div class="j"><span class="ok">✓</span><span>עמוד הרשמה ציבורי (תנועטף / בייבי שירי)</span><span></span><span class="sm mut">200</span></div>
+<div class="j"><span class="ok">✓</span><span>Workforce כניסה · Meet</span><span></span><span class="sm mut">200</span></div>
+<div class="j"><span class="ok">✓</span><span>לוגים 10 דק' — אין שגיאות חדשות</span><span></span><span></span></div>
+<div class="sm mut" style="margin-top:8px">אם בדיקה כאן נכשלת: נפתחת תקלה, מקבלים התראה בערוץ השגיאות, ויש כפתור החזרה לגרסה הקודמת.</div></div>
+</div></div></div></section>
+
+
+<section id="s7"><div class="sh"><h2>7 · איך יודעים שה-QA עצמו עובד</h2><span>admin › איכות › בריאות QA</span></div>
+<div class="frame"><div class="bar">https://otomator-admin.pages.dev/dev/qa/health</div><div class="adm"><div class="side"><div class="grp">איכות</div><div class="it">ריצות QA</div><div class="it">תאום פרודקשן</div><div class="it on">בריאות QA</div></div>
+<div class="main"><div class="ttl"><h3>בריאות QA</h3><span class="pill pg">ה-QA תופס 12/12 באגים מוכרים</span></div>
+<div class="card"><b style="font-size:14px">ספריית באגים — באגים אמיתיים מהעבר שהוחזרו בכוונה</b>
+<div class="j"><span class="ok">✓</span><span>הודעת יום הולדת עם שם מלא במקום שם פרטי (תנועטף)</span><span class="sm mut">נתפס ע״י: יום הולדת</span><span class="sm mut">0:40</span></div>
+<div class="j"><span class="ok">✓</span><span>אמא עם תאומים נחסמת בהרשמה למועדון (בייבי שירי)</span><span class="sm mut">נתפס ע״י: הרשמה למנוי</span><span class="sm mut">1:10</span></div>
+<div class="j"><span class="ok">✓</span><span>חיוב מנוי בחצי מחיר במקום מלא</span><span class="sm mut">נתפס ע״י: תשלום SUMIT</span><span class="sm mut">2:30</span></div>
+<div class="j"><span class="ok">✓</span><span>"שלח שוב" לא יוצר הודעה בתור</span><span class="sm mut">נתפס ע״י: תור הודעות</span><span class="sm mut">1:50</span></div>
+<div class="j"><span class="ok">✓</span><span>ילד עם הטלפון של ההורה נדחה כמשלם</span><span class="sm mut">נתפס ע״י: הרשמה לחוג</span><span class="sm mut">1:20</span></div>
+<div class="j"><span class="ok">✓</span><span>קישור חודש מתנה מבקש כרטיס אשראי</span><span class="sm mut">נתפס ע״י: קישורי מתנה</span><span class="sm mut">0:55</span></div>
+<div class="sm mut" style="margin-top:6px">+6 נוספים · באג שה-QA לא תופס = "QA לא תופס" באדום, וזה חוסם שחרורים עד שנוספת בדיקה.</div></div>
+<div class="kpis"><div class="kpi"><span class="sm mut">קנרי שבועי (בנייה שבורה בכוונה)</span><b class="ok">נחסם ✓</b><span class="sm mut">שני 03:00</span></div><div class="kpi"><span class="sm mut">כיסוי אפליקציה × תפקיד</span><b>58/62</b><span class="sm mut">4 חסרים</span></div><div class="kpi"><span class="sm mut">בדיקות לא יציבות (14 יום)</span><b>1</b><span class="sm mut">מסומנת</span></div><div class="kpi"><span class="sm mut">התאמת הודעות לטלפון שלך</span><b class="ok">23/23</b><span class="sm mut">0 יתומות</span></div></div>
+<div class="card"><b style="font-size:14px">כיסוי חסר</b><div class="j"><span class="x">!</span><span>קמפיינר · עובד</span><span></span><span></span></div><div class="j"><span class="x">!</span><span>Meet · לקוח קצה</span><span></span><span></span></div><div class="j"><span class="x">!</span><span>פיננסים · מנהל</span><span></span><span></span></div><div class="j"><span class="x">!</span><span>מאמן · מטופל</span><span></span><span></span></div></div>
+</div></div></div></section>
+
+<section id="s8"><div class="sh"><h2>8 · מצבים לכל מסך + טלפון</h2><span>ריק · טוען · שגיאה · אין הרשאה</span></div>
+<style>.sg{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.st{background:var(--bg);color:#fff;border-radius:10px;padding:14px;min-height:150px;font-size:13px}.st h4{margin:0 0 8px;font-size:12px;color:var(--mut);font-weight:500}.sk{height:12px;border-radius:6px;background:#2f3345;margin:8px 0}.ctr{text-align:center;padding-top:14px}.lbl{font-weight:700;margin:10px 0 4px;color:#1d1d1b}@media(max-width:860px){.sg{grid-template-columns:1fr 1fr}}</style>
+<div class="lbl">תור שחרורים (מסך 2)</div><div class="sg">
+<div class="st"><h4>ריק</h4><div class="ctr">אין פריטים שממתינים לשחרור<br><span class="mut sm">מה שמוכן ימוזג ל-staging ויופיע כאן</span></div></div>
+<div class="st"><h4>טוען</h4><div class="sk" style="width:80%"></div><div class="sk"></div><div class="sk" style="width:60%"></div><div class="sk"></div></div>
+<div class="st"><h4>שגיאה</h4><div class="ctr"><span class="x">לא הצלחנו לטעון את תור השחרורים</span><br><br><button class="btn gh">נסה שוב</button><br><span class="mut sm">קידום לפרודקשן חסום עד שהמצב נטען</span></div></div>
+<div class="st"><h4>אין הרשאה</h4><div class="ctr">אין לך הרשאה לשחרורים<br><span class="mut sm">רק ניצן יכול לקדם לפרודקשן או לכבות את שער ה-QA</span></div></div></div>
+<div class="lbl">דוח ריצה (מסך 3)</div><div class="sg">
+<div class="st"><h4>ריצה עוברת</h4><span class="pill pg">עבר · 47/47</span><div class="j"><span class="ok">✓</span><span>כל התפקידים</span><span></span><span class="sm mut">38 דק'</span></div><span class="mut sm">אין כשלים · 23 הודעות נמסרו לניצן</span></div>
+<div class="st"><h4>רץ עכשיו</h4><span class="pill py">רץ · 31/47</span><div class="prog"><i style="width:66%"></i></div><span class="mut sm">מסלול נוכחי: תור הודעות · עובד</span></div>
+<div class="st"><h4>לא הצליח לרוץ</h4><span class="pill pr">QA לא הצליח לרוץ</span><p class="sm">staging לא עונה (503) · נחשב כשלון</p><button class="btn gh">הרץ שוב</button></div>
+<div class="st"><h4>ריצה לא נמצאה</h4><div class="ctr">הריצה הזאת לא קיימת או נמחקה<br><span class="mut sm">חזרה לתור השחרורים</span></div></div></div>
+<div class="lbl">תאום פרודקשן (מסך 5)</div><div class="sg">
+<div class="st"><h4>עוד לא רץ</h4><div class="ctr">התאום עוד לא נוצר<br><span class="mut sm">הריענון הראשון ירוץ הלילה ב-02:00</span></div></div>
+<div class="st"><h4>מתרענן</h4><span class="pill py">מתרענן · 21/38 ארגונים</span><div class="prog"><i style="width:55%"></i></div><span class="mut sm">QA ממתין עד סוף הריענון</span></div>
+<div class="st"><h4>בדיקת בטיחות נכשלה</h4><span class="pill pr">נעצר · נמצאו 3 טלפונים אמיתיים</span><p class="sm">שליחות ב-Staging כובו אוטומטית עד תיקון · נשלחה התראה</p></div>
+<div class="st"><h4>ריענון לא קרה</h4><span class="pill pr">אין ריענון 26 שעות</span><p class="sm">נשלחה התראה בערוץ השגיאות</p></div></div>
+<div class="lbl">בריאות QA (מסך 7)</div><div class="sg">
+<div class="st"><h4>QA לא תופס</h4><span class="pill pr">QA לא תופס · 11/12</span><p class="sm">"קישור חודש מתנה מבקש כרטיס" לא נתפס · שחרורים חסומים עד שנוספת בדיקה</p></div>
+<div class="st"><h4>קנרי עבר (רע)</h4><span class="pill pr">קנרי לא נחסם</span><p class="sm">בנייה שבורה עברה QA · שחרורים חסומים</p></div>
+<div class="st"><h4>טוען</h4><div class="sk"></div><div class="sk" style="width:70%"></div><div class="sk"></div></div>
+<div class="st"><h4>אין הרשאה</h4><div class="ctr">אין לך הרשאה למחלקת QA</div></div></div>
+<div class="lbl">טלפון — תור שחרורים + דוח</div>
+<div style="display:flex;gap:18px;flex-wrap:wrap;justify-content:center">
+<div class="phone" style="background:var(--bg);color:#fff"><div style="padding:12px"><b>תור שחרורים · Hub</b><div class="sm mut" style="margin:4px 0 10px">staging <span class="mono">a91f3c2</span> · <span class="ok">QA עבר</span></div>
+<div class="card" style="padding:10px"><div>שליחה מחדש בתור הודעות</div><div class="sm mut">#4012</div><span class="pill pg">QA עבר</span></div>
+<div class="card" style="padding:10px"><div>חיוב מנוי במחיר מלא</div><div class="sm mut">#4021</div><span class="pill pr">QA נכשל · 2</span></div>
+<button class="btn" style="width:100%">קידום לפרודקשן בחלון הלילה</button></div></div>
+<div class="phone" style="background:var(--bg);color:#fff"><div style="padding:12px"><b>ריצה 1187</b> <span class="pill pr">45/47</span>
+<div class="j"><span class="x">✗</span><span>הרשמה למנוי + תשלום</span><span></span><span></span></div><div class="j"><span class="x">✗</span><span>תור הודעות</span><span></span><span></span></div><div class="j"><span class="ok">✓</span><span>לקוח קצה</span><span></span><span></span></div>
+<div class="shot" style="height:110px;margin-top:8px"><div style="padding:10px;font-size:12px">סכום ששולם: ₪145<br>צפוי: ₪290</div></div></div></div></div>
+</section>
+<div class="note"><b>לא בשלב הזה:</b> מסך "מחלקת QA" המלא, כשל שפותח קריאה עם בדיקה משחזרת (Q3) · סביבות בדיקה לפורטל, פיננסים, אדמין ו-WhatsApp (Q4) · השוואת צילומי מסך לילית (Q5).</div>
+</div></body></html>
