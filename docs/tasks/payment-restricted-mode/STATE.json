@@ -1,0 +1,34 @@
+{
+  "slug": "payment-restricted-mode",
+  "task_id": "26bbff7f-b12f-4e32-9f09-76884199eb69",
+  "phase": "building",
+  "phases": [
+    "new",
+    "building",
+    "ready_for_cowork",
+    "fix_requested",
+    "approved",
+    "merged",
+    "released",
+    "blocked"
+  ],
+  "round": 2,
+  "repos": [
+    {
+      "repo": "the-Otomator/jumpstartapp",
+      "branch": "feature/payment-restricted-mode",
+      "pr": null,
+      "preview_url": null,
+      "final_sha": null
+    },
+    {
+      "repo": "the-Otomator/jumpstart-whatsapp-service",
+      "branch": "feature/payment-restricted-mode",
+      "pr": 93,
+      "preview_url": null,
+      "final_sha": "f7963b242850b124b55f739f4fa0f7c5053af2d0"
+    }
+  ],
+  "updated_at": "2026-11-11",
+  "updated_by": "codex"
+}

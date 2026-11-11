@@ -9,6 +9,7 @@ import {
 import { orgLogger } from '../lib/logger'
 import { getSenderPool } from '../pool'
 import { assertSafeOutboundUrl } from '../lib/webhookDispatcher'
+import { assertPaymentAllowsSend, PaymentRestrictedError } from '../lib/paymentRestriction'
 
 import { assertDeviceCanSend } from '../lib/deviceSendPolicy'
 
@@ -51,6 +52,7 @@ router.post('/send', validateBody(sendMessageSchema), async (req: Request, res: 
   try {
     await assertDeviceCanSend(body.orgId)
     if (body.enqueue && lane === 'marketing') {
+      await assertPaymentAllowsSend(body.orgId)
       const pool = getSenderPool(body.orgId)
       const jobId = pool.enqueue(body, 'marketing')
       log.info({ to: body.to, type: body.type, jobId, lane }, 'Message enqueued')
@@ -62,6 +64,10 @@ router.post('/send', validateBody(sendMessageSchema), async (req: Request, res: 
     log.info({ to: body.to, type: body.type, messageId, lane }, 'Message sent')
     res.json({ success: true, messageId, lane })
   } catch (err) {
+    if (err instanceof PaymentRestrictedError) {
+      res.status(423).json({ error: 'restricted', code: 'PAYMENT_RESTRICTED' })
+      return
+    }
     const msg = (err as Error).message
     const isTimeout = msg === 'send_timeout' || msg.includes('send_timeout')
     const status = msg === 'WA_DEVICE_LISTEN_ONLY' ? 403 : msg === 'WA_DEVICE_POLICY_UNAVAILABLE' ? 503 : msg.includes('not connected') ? 404 : 500
@@ -94,6 +100,7 @@ router.post('/send-bulk', validateBody(sendBulkSchema), async (req: Request, res
     try {
       await assertDeviceCanSend(msg.orgId)
       if (msg.enqueue && lane === 'marketing') {
+        await assertPaymentAllowsSend(msg.orgId)
         const pool = getSenderPool(msg.orgId)
         const jobId = pool.enqueue(msg, 'marketing')
         results.push({ to: msg.to, success: true, jobId, queued: true })
@@ -106,7 +113,7 @@ router.post('/send-bulk', validateBody(sendBulkSchema), async (req: Request, res
       log.debug({ to: msg.to, messageId, lane }, 'Bulk message sent')
     } catch (err) {
       const errMsg = (err as Error).message
-      results.push({ to: msg.to, success: false, error: errMsg })
+      results.push({ to: msg.to, success: false, error: err instanceof PaymentRestrictedError ? 'restricted' : errMsg })
       log.warn({ to: msg.to, err: errMsg }, 'Bulk message failed')
     }
   }

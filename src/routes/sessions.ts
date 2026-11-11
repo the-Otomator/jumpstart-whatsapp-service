@@ -25,6 +25,7 @@ import { jumpstartSupabase } from '../lib/jumpstartSupabase'
 import { reconcileSessions, type WaDeviceRow } from '../lib/waDeviceReconcile'
 import { isValidWebhookUrl, redactWebhookUrl, WEBHOOK_URL_REQUIRED } from '../lib/webhookUrl'
 import { sendWhatsAppMessage } from './messages'
+import { PaymentRestrictedError } from '../lib/paymentRestriction'
 
 const router = Router()
 
@@ -252,6 +253,10 @@ router.post(
       log.info({ to, messageId }, 'Message sent (session path)')
       res.json({ success: true, messageId })
     } catch (err) {
+      if (err instanceof PaymentRestrictedError) {
+        res.status(423).json({ error: 'restricted', code: 'PAYMENT_RESTRICTED' })
+        return
+      }
       const msg = (err as Error).message
       const isTimeout = msg === 'send_timeout' || msg.includes('send_timeout')
       const status = msg === 'WA_DEVICE_LISTEN_ONLY' ? 403 : msg === 'WA_DEVICE_POLICY_UNAVAILABLE' ? 503 : msg.includes('not connected') ? 404 : 500

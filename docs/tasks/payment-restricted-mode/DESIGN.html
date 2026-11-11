@@ -1,0 +1,53 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DESIGN — מצב מוגבל</title>
+<style>
+:root{--b:#1E40AF;--t:#0F172A;--m:#64748B;--l:#E2E8F0;--bg:#F8FAFC;--c:#fff;--warn:#B45309;--warnbg:#FFF7ED;--down:#DC2626;--downbg:#FEF2F2}
+@media(prefers-color-scheme:dark){:root{--t:#E2E8F0;--m:#94A3B8;--l:#1E293B;--bg:#0B1120;--c:#111827;--warnbg:#2b1d05;--warn:#FCD34D;--downbg:#2a0b0b}}
+body{font-family:Heebo,system-ui,sans-serif;background:var(--bg);color:var(--t);margin:0;line-height:1.55}
+.doc{max-width:1100px;margin:auto;padding:24px 16px}h2{font-size:18px;margin:32px 0 8px;border-top:2px solid var(--l);padding-top:18px}
+.spec{background:#FEF9C3;color:#713F12;border-radius:8px;padding:8px 12px;font-size:14px;margin:8px 0}
+.row{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start}.desk{flex:1 1 620px;border:1px solid var(--l);border-radius:12px;overflow:hidden;background:var(--bg)}
+.mob{width:390px;max-width:100%;border:8px solid #0F172A;border-radius:26px;overflow:hidden;background:var(--bg)}
+.bar{background:var(--warnbg);color:var(--warn);padding:10px 14px;font-size:14px;display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap}
+.bar a{background:var(--warn);color:#fff;border-radius:8px;padding:5px 12px;text-decoration:none;font-weight:700;white-space:nowrap}
+.app{display:flex;min-height:300px}.side{width:170px;background:var(--c);border-inline-end:1px solid var(--l);padding:12px;font-size:14px;color:var(--m)}.side div{padding:6px 0}
+.main{flex:1;padding:16px}.tb{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.btn{background:var(--b);color:#fff;border:0;border-radius:8px;padding:7px 14px;font:inherit;font-weight:700}.btn.dis{opacity:.45;cursor:not-allowed}
+.btn.sec{background:transparent;color:var(--b);border:1px solid var(--b)}
+table{width:100%;border-collapse:collapse;font-size:14px;background:var(--c);border:1px solid var(--l);border-radius:10px}td,th{padding:8px;border-bottom:1px solid var(--l);text-align:right}
+.tip{display:inline-block;background:var(--t);color:var(--bg);font-size:12px;border-radius:6px;padding:3px 8px;margin-inline-start:6px}
+.card{background:var(--c);border:1px solid var(--l);border-radius:14px;padding:22px;text-align:center;max-width:440px;margin:30px auto}
+.card h3{margin:0 0 8px}.sub{color:var(--m);font-size:14px}
+.tl{display:flex;gap:4px;font-size:13px;margin:8px 0}.tl div{flex:1;padding:8px;border-radius:8px;text-align:center}
+</style></head><body><div class="doc">
+<h1 style="font-size:22px;margin:0">מצב מוגבל באי־תשלום</h1>
+<div class="sub">payment-restricted-mode · Cowork · 11.11.2026 · טקסטים לפי LOGIC.md · כבוי עד תנאי שימוש v2</div>
+
+<h2>0 · ציר הזמן</h2>
+<div class="tl"><div style="background:#ECFDF5;color:#166534">ימים 0–7<br><b>חסד</b> (קיים)</div><div style="background:var(--warnbg);color:var(--warn)">ימים 7–37<br><b>מצב מוגבל</b> (חדש)</div><div style="background:var(--downbg);color:var(--down)">מיום 37<br><b>השעיה</b> + דפים ציבוריים</div></div>
+<div class="spec">תשלום מלא בכל שלב → הכל חוזר מיד. חל על כל הארגון: ה־Hub וכל האפליקציות.</div>
+
+<h2>1 · מצב מוגבל — בעל החשבון (דסקטופ + נייד)</h2>
+<div class="row">
+<div class="desk">
+<div class="bar"><span>החשבון במצב מוגבל בגלל תשלום שלא הוסדר. אפשר לצפות ולייצא, אבל לא לבצע פעולות או לשלוח הודעות. ב־12.12.2026 החשבון יושעה.</span><a href="#">להסדרת התשלום</a></div>
+<div class="app"><div class="side"><div>בית</div><div>אנשי קשר</div><div>לידים</div><div>אוטומציות</div><div>חוגים</div></div>
+<div class="main"><div class="tb"><b>אנשי קשר</b><div><button class="btn sec">ייצוא</button> <button class="btn dis">+ איש קשר</button><span class="tip">לא זמין במצב מוגבל</span></div></div>
+<table><tr><th>שם</th><th>טלפון</th><th></th></tr><tr><td>דנה כהן</td><td>050-0000000</td><td><button class="btn dis">שליחת WhatsApp</button></td></tr><tr><td>יוסי לוי</td><td>052-0000000</td><td><button class="btn dis">שליחת WhatsApp</button></td></tr></table>
+<p class="sub">4 הודעות ממתינות ויישלחו אחרי הסדרת התשלום</p></div></div></div>
+<div class="mob"><div class="bar"><span>החשבון במצב מוגבל בגלל תשלום שלא הוסדר. אפשר לצפות ולייצא, אבל לא לבצע פעולות או לשלוח הודעות. ב־12.12.2026 החשבון יושעה.</span><a href="#">להסדרת התשלום</a></div>
+<div class="main"><b>אנשי קשר</b><table style="margin-top:8px"><tr><td>דנה כהן</td><td><button class="btn dis">WhatsApp</button></td></tr></table></div></div>
+</div>
+<div class="spec">הפס קבוע (לא נסגר). כל כפתור יצירה/עריכה/מחיקה/שליחה/הפעלה — מעומעם עם Tooltip "לא זמין במצב מוגבל". טפסים נפתחים לקריאה. זמינים: צפייה, חיפוש, ייצוא, מסך תשלום, פרופיל. "הודעות ממתינות" מופיע בתור ההודעות.</div>
+
+<h2>2 · מצב מוגבל — עובד (לא בעל החשבון)</h2>
+<div class="row"><div class="mob"><div class="bar"><span>החשבון במצב מוגבל. אפשר לצפות בנתונים, אבל לא לבצע פעולות. לפרטים פנו לבעל החשבון.</span></div><div class="main sub">(אותם כפתורים מעומעמים, בלי כפתור תשלום)</div></div></div>
+
+<h2>3 · השעיה — מסך הצוות</h2>
+<div class="row"><div class="desk"><div class="card"><h3>החשבון הושעה</h3><div class="sub">החשבון הושעה בגלל תשלום שלא הוסדר. הדפים הציבוריים אינם זמינים. הסדרת התשלום תחזיר הכל מיד, כולל ההגדרות.</div><div style="margin-top:14px"><button class="btn">להסדרת התשלום</button></div></div></div></div>
+<div class="spec">מבוסס על מסך החסימה הקיים (TrialBlockedScreen, מצב תשלום) — רק הכותרת המשנית מתעדכנת. עובד שאינו בעל החשבון: "פנו לבעל החשבון" כמו היום.</div>
+
+<h2>4 · השעיה — דף ציבורי / פורטל לקוחות</h2>
+<div class="row"><div class="mob"><div class="card" style="margin:60px auto"><div class="sub" style="font-size:16px">העמוד אינו זמין כרגע.</div></div></div></div>
+<div class="spec">ניטרלי: בלי שם העסק, בלי סיבה, בלי לוגו של העסק. רק בשלב ההשעיה (לא במצב מוגבל — אז הדפים עובדים רגיל).</div>
+</div></body></html>

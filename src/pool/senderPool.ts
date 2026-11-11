@@ -3,6 +3,7 @@ import { orgLogger } from '../lib/logger'
 import { loadSessionMeta } from '../lib/sessionStore'
 import { postWebhook } from '../lib/webhookDispatcher'
 import { sendWhatsAppMessageDirect } from '../lib/sendDirect'
+import { assertPaymentAllowsSend, PaymentRestrictedError } from '../lib/paymentRestriction'
 import { WA_ENQUEUE_CEILING_MS, WA_SEND_TIMEOUT_MS, withTimeout } from '../lib/withTimeout'
 import { getProviderForOrg, getMetaCloudProvider } from '../providers'
 import { isOfficialOtp, OTP_SEND_BUDGET_MS } from '../lib/officialOtp'
@@ -111,6 +112,7 @@ export class SenderPool {
       }
 
       const ceilingTimer = setTimeout(() => {
+        job.cancelled = true
         this.removeQueuedJob(job.id, lane)
         orgLogger(this.orgId).warn(
           { jobId: job.id, ceilingMs: WA_ENQUEUE_CEILING_MS },
@@ -134,6 +136,7 @@ export class SenderPool {
     const controller = new AbortController()
     this.officialOtpInFlight++
     try {
+      await assertPaymentAllowsSend(this.orgId)
       const result = await withTimeout(
         (async () => {
           const provider = getMetaCloudProvider()
@@ -153,6 +156,7 @@ export class SenderPool {
       orgLogger(this.orgId).info({ elapsedMs: Date.now() - started, messageId: result }, 'Official OTP provider accepted')
       return result
     } catch (err) {
+      if (err instanceof PaymentRestrictedError) throw err
       this.onSendFailure((err as Error).message)
       orgLogger(this.orgId).error({ elapsedMs: Date.now() - started, code: 'OTP_SEND_FAILED' }, 'Official OTP operational send failed')
       throw err
@@ -250,6 +254,8 @@ export class SenderPool {
         }
 
         try {
+          await assertPaymentAllowsSend(job.req.orgId)
+          if (job.cancelled) continue
           const messageId = await withTimeout(
             sendWhatsAppMessageDirect(job.req),
             WA_SEND_TIMEOUT_MS,
@@ -258,6 +264,12 @@ export class SenderPool {
           this.onSendSuccess(job.lane)
           job.resolve(messageId)
         } catch (err) {
+          if (err instanceof PaymentRestrictedError) {
+            // JumpStart retains durable items. Standalone queue jobs have no outbox reference.
+            orgLogger(this.orgId).info({ jobId: job.id, reason: 'restricted' }, 'WhatsApp send refused by payment policy')
+            job.reject(err)
+            continue
+          }
           const msg = (err as Error).message
           if (msg === 'send_timeout') {
             orgLogger(this.orgId).warn(
