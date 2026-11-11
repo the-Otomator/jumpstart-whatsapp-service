@@ -5,7 +5,7 @@ import { isPaymentRestricted } from './paymentRestriction'
 async function main() {
   const orgId = '00000000-0000-4000-8000-000000000001'
   let devices = [{ organization_id: orgId }]
-  let decision: boolean | null = true
+  let decision: boolean | { code: string } = true
   let decisionStatus = 200
   const calls: string[] = []
   const client = createClient('https://fixture.example.test', 'fixture-key', {
@@ -23,6 +23,12 @@ async function main() {
   assert.equal(await isPaymentRestricted('fixture', client), true)
   decision = false
   assert.equal(await isPaymentRestricted('fixture', client), false, 're-read after payment')
+  decisionStatus = 404
+  for (const code of ['PGRST202', '42883']) {
+    decision = { code }
+    assert.equal(await isPaymentRestricted('fixture', client), false, `missing RPC (${code}) fails open`)
+  }
+  decision = { code: '57014' }
   decisionStatus = 503
   assert.equal(await isPaymentRestricted('fixture', client), false, 'decision unavailable fails open')
   devices = []
