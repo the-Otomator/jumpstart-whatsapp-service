@@ -33,7 +33,6 @@ import type {
 } from './types'
 
 const pools = new Map<string, SenderPool>()
-const PAYMENT_HOLD_RECHECK_MS = 30_000
 
 export function getSenderPool(orgId: string): SenderPool {
   let pool = pools.get(orgId)
@@ -174,7 +173,6 @@ export class SenderPool {
       req,
       lane,
       enqueuedAt: Date.now(),
-      retainedByService: true,
       resolve: () => {},
       reject: () => {},
     }
@@ -218,18 +216,17 @@ export class SenderPool {
     this.scheduleProcess()
   }
 
-  private scheduleProcess(delay = 0): void {
+  private scheduleProcess(): void {
     if (this.processorTimer) return
     this.processorTimer = setTimeout(() => {
       this.processorTimer = null
       void this.processQueue()
-    }, delay)
+    }, 0)
   }
 
   private async processQueue(): Promise<void> {
     if (this.processing) return
     this.processing = true
-    let nextDelay = 0
 
     try {
       while (true) {
@@ -268,12 +265,8 @@ export class SenderPool {
           job.resolve(messageId)
         } catch (err) {
           if (err instanceof PaymentRestrictedError) {
-            if (job.retainedByService) {
-              this.requeueFront(job)
-              nextDelay = PAYMENT_HOLD_RECHECK_MS
-              break
-            }
-            // Synchronous callers own the message and can retry their existing outbox item.
+            // JumpStart retains durable items. Standalone queue jobs have no outbox reference.
+            orgLogger(this.orgId).info({ jobId: job.id, reason: 'restricted' }, 'WhatsApp send refused by payment policy')
             job.reject(err)
             continue
           }
@@ -297,7 +290,7 @@ export class SenderPool {
         !this.state.paused &&
         (this.operationalQueue.length > 0 || this.marketingQueue.length > 0)
       ) {
-        this.scheduleProcess(nextDelay)
+        this.scheduleProcess()
       }
     }
   }

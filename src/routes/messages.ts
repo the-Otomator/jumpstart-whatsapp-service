@@ -9,7 +9,7 @@ import {
 import { orgLogger } from '../lib/logger'
 import { getSenderPool } from '../pool'
 import { assertSafeOutboundUrl } from '../lib/webhookDispatcher'
-import { PaymentRestrictedError } from '../lib/paymentRestriction'
+import { assertPaymentAllowsSend, PaymentRestrictedError } from '../lib/paymentRestriction'
 
 import { assertDeviceCanSend } from '../lib/deviceSendPolicy'
 
@@ -52,6 +52,7 @@ router.post('/send', validateBody(sendMessageSchema), async (req: Request, res: 
   try {
     await assertDeviceCanSend(body.orgId)
     if (body.enqueue && lane === 'marketing') {
+      await assertPaymentAllowsSend(body.orgId)
       const pool = getSenderPool(body.orgId)
       const jobId = pool.enqueue(body, 'marketing')
       log.info({ to: body.to, type: body.type, jobId, lane }, 'Message enqueued')
@@ -99,6 +100,7 @@ router.post('/send-bulk', validateBody(sendBulkSchema), async (req: Request, res
     try {
       await assertDeviceCanSend(msg.orgId)
       if (msg.enqueue && lane === 'marketing') {
+        await assertPaymentAllowsSend(msg.orgId)
         const pool = getSenderPool(msg.orgId)
         const jobId = pool.enqueue(msg, 'marketing')
         results.push({ to: msg.to, success: true, jobId, queued: true })

@@ -56,7 +56,6 @@ export interface QueuedJob {
   req: SendMessageRequest
   lane: MessageLane
   enqueuedAt: number
-  retainedByService?: boolean
   cancelled?: boolean
   resolve: (messageId: string) => void
   reject: (err: Error) => void
