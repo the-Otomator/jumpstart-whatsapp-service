@@ -51,6 +51,7 @@ export const sendMessageSchema = z.object({
   to: phoneSchema,
   lane: z.enum(['operational', 'marketing']).optional().default('operational'),
   enqueue: z.boolean().optional().default(false),
+  expiresAt: z.string().datetime({ offset: true }).optional(),
   type: z.enum(['text', 'image', 'video', 'audio', 'document', 'location', 'contact', 'template']).optional().default('text'),
   message: z.string().max(4096, 'Message too long (max 4096 chars)').optional(),
   mediaUrl: z.string().url('Must be a valid URL').optional(),
