@@ -10,6 +10,7 @@ import { BaileysProvider } from './providers/baileys/baileysProvider'
 import { MetaCloudProvider } from './providers/meta-cloud/metaCloudProvider'
 import makeWASocket from '@whiskeysockets/baileys'
 import { requireWebhookUrl, WebhookUrlRequiredError } from './lib/webhookUrl'
+import { getSenderPool } from './pool'
 
 export async function startSession(
   orgId: string,
@@ -113,6 +114,11 @@ export async function updateSessionWebhook(
 export async function restoreSessions(): Promise<void> {
   for (const provider of getAllProviders()) {
     await provider.restoreSessions()
+    if (provider.type === 'meta-cloud') {
+      for (const session of provider.listActiveSessions()) {
+        if (session.status === 'connected') getSenderPool(session.orgId).resumeRestoredWork()
+      }
+    }
   }
 }
 

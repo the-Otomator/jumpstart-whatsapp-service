@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { QueuedJob } from './types'
+import { orgLogger } from '../lib/logger'
 
 type StoredJob = Pick<QueuedJob, 'id' | 'req' | 'lane' | 'enqueuedAt' | 'paymentHeld'>
 type Outcome = 'sending' | 'sent' | 'failed' | 'restricted' | 'expired'
@@ -31,7 +32,8 @@ export function storeSenderJob(session: string, job: StoredJob): void {
 }
 
 export function recordSenderJobOutcome(session: string, id: string, outcome: Outcome): void {
-  write(session, id, { outcome, at: Date.now() })
+  const skipped = outcome === 'restricted' || outcome === 'expired'
+  write(session, id, { outcome, at: Date.now(), ...(skipped ? { status: 'skipped', reason: outcome } : {}) })
 }
 
 export function restoreSenderJobs(session: string): StoredJob[] {
@@ -41,9 +43,13 @@ export function restoreSenderJobs(session: string): StoredJob[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith('.json')) continue
     const file = path.join(dir, entry.name)
-    const stored = JSON.parse(fs.readFileSync(file, 'utf8')) as StoredJob | { outcome: Outcome; at: number }
-    if ('req' in stored && stored.id + '.json' === entry.name && stored.req.orgId === session) jobs.push(stored)
-    else if ('at' in stored && Date.now() - stored.at > 7 * 86_400_000) fs.unlinkSync(file)
+    try {
+      const stored = JSON.parse(fs.readFileSync(file, 'utf8')) as StoredJob | { outcome: Outcome; at: number }
+      if ('req' in stored && stored.id + '.json' === entry.name && stored.req.orgId === session) jobs.push(stored)
+      else if ('at' in stored && Date.now() - stored.at > 7 * 86_400_000) fs.unlinkSync(file)
+    } catch {
+      orgLogger(session).warn({ jobFile: entry.name }, 'Could not read a durable WhatsApp queue record')
+    }
   }
   return jobs.sort((a, b) => a.enqueuedAt - b.enqueuedAt)
 }

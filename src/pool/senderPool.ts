@@ -85,6 +85,10 @@ export class SenderPool {
     }
   }
 
+  resumeRestoredWork(): void {
+    if (this.marketingQueue.some(job => job.durable)) this.scheduleProcess()
+  }
+
   estimateCapacity(req: CapacityEstimateRequest): CapacityEstimateResponse {
     this.state = resetMarketingDayIfNeeded(this.state)
     return estimateCapacity(this.state, req)
