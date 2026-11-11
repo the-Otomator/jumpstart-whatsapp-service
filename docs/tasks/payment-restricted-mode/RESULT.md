@@ -59,3 +59,25 @@ Files changed are this report and `STATE.json`. This was a read-only investigati
 - **B.** Narrow the product acceptance criteria to queues and send paths owned by the JumpStart repositories and explicitly define the treatment of WhatsApp jobs the service already accepted.
 
 D7 remains the approved activation design. The Round 0 recommendation about a separate activation timestamp is resolved.
+
+## Round 2 — WhatsApp service (D8)
+
+[Draft PR #93](https://github.com/the-Otomator/jumpstart-whatsapp-service/pull/93) has the task line. Tested service code SHA `8db5be0378d103b539441f3db80817621a9da541`. Work ran locally in the dedicated WhatsApp worktree from verified `origin/master` at `e5f29e0d9d0a5eecbdc8eb6d3ebd548f9f80bd47`. The JumpStart worktree already contained an active implementation, including the shared billing RPC, so this round took the WhatsApp unit.
+
+| Guarded provider path | Implementation |
+|---|---|
+| Device owner and billing decision | `src/lib/paymentRestriction.ts:12` resolves `wa_devices` ownership and calls the shared service-only `payment_restricted_outbound_blocked` RPC. Fail-open errors are logged. |
+| Normal pooled delivery | `src/pool/senderPool.ts:261` checks before calling the provider. A service-owned asynchronous job returns to the front of the queue and rechecks after 30 seconds. A held job does not count as a delivery failure. |
+| Direct official OTP provider path | `src/pool/senderPool.ts:150` checks before the direct send. |
+| Direct group send | `src/routes/groups.ts:312` checks billing alongside the existing device policy. |
+| Synchronous callers | `src/routes/messages.ts:67` and `src/routes/sessions.ts:257` report HTTP 423 with `PAYMENT_RESTRICTED`. The caller owns and must retain its durable outbox item. Bulk response entries use `restricted`. |
+
+Fresh `npm ci` succeeded inside the isolated worktree. `npm run test:payment-restriction` and `tsc --noEmit` exited 0. Tests used an HTTP fixture for the Supabase decision and mocked the provider. They covered hold and resume, no provider call while restricted, no duplicate WA job for a synchronous refusal, and fail-open when the decision is unavailable. The repository-wide test suite was started. Its final status is recorded below when available.
+
+A read-only Staging catalog check found that the companion RPC had yet to be applied. The local run using the actual Staging database remains pending. The service's accepted async pool is in memory and has no existing expiry or JumpStart outbox reference. This PR retains jobs in that pool while the process runs. Restart durability and expired-item writeback still need end-to-end coverage with the durable JumpStart outbox before AC-07 can pass. No live provider session or real WhatsApp send was used for validation.
+
+### WhatsApp follow-up verification
+
+- Final service source SHA `f7963b242850b124b55f739f4fa0f7c5053af2d0`. The OTP follow-up preserved its original provider timeout and in-flight counter. TypeScript and the isolated official OTP regression test exited 0 on the final code. The production device record for the official OTP sender resolves to an exempt organization under the existing billing decision.
+- The repository-wide `npm test` passed through the tests preceding `officialOtp.test.ts`, then exited 1 because a prior failed local run left the official OTP fixture directory in its working directory. Re-running the OTP test in a separate empty fixture directory passed, followed by successful isolated runs of `officialOtpRecovery.test.ts` and `waDeviceObservation.test.ts`.
+- After the RPC appeared in Staging, a local service run authenticated to `tyiylxtihzvxooecurwe` with the Staging service role and selected one existing synthetic device. The real RPC and the adapter both returned false with the switch absent. The mocked provider received one call and the pool was empty afterward. The active restricted branch was covered by the local provider mock with an injected restriction decision. A live restricted-Staging provider-mock run and durable expiry/restart coverage remain pending.

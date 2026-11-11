@@ -1,7 +1,7 @@
 {
   "slug": "payment-restricted-mode",
   "task_id": "26bbff7f-b12f-4e32-9f09-76884199eb69",
-  "phase": "new",
+  "phase": "building",
   "phases": [
     "new",
     "building",
@@ -24,11 +24,11 @@
     {
       "repo": "the-Otomator/jumpstart-whatsapp-service",
       "branch": "feature/payment-restricted-mode",
-      "pr": null,
+      "pr": 93,
       "preview_url": null,
-      "final_sha": null
+      "final_sha": "f7963b242850b124b55f739f4fa0f7c5053af2d0"
     }
   ],
   "updated_at": "2026-11-11",
-  "updated_by": "cowork"
+  "updated_by": "codex"
 }
