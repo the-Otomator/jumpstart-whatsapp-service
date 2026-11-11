@@ -133,6 +133,7 @@ export class SenderPool {
   }
 
   private async sendOfficialOtp(req: SendMessageRequest): Promise<string> {
+    await assertPaymentAllowsSend(this.orgId)
     const started = Date.now()
     const controller = new AbortController()
     this.officialOtpInFlight++
@@ -147,8 +148,6 @@ export class SenderPool {
             this.resume()
           }
           // Call the Meta provider explicitly: never select another provider.
-          await assertPaymentAllowsSend(this.orgId)
-          if (controller.signal.aborted) throw new Error('send_timeout')
           return (await provider.sendMessage({ ...req, signal: controller.signal })).messageId
         })(),
         OTP_SEND_BUDGET_MS,
@@ -158,7 +157,6 @@ export class SenderPool {
       orgLogger(this.orgId).info({ elapsedMs: Date.now() - started, messageId: result }, 'Official OTP provider accepted')
       return result
     } catch (err) {
-      if (err instanceof PaymentRestrictedError) throw err
       this.onSendFailure((err as Error).message)
       orgLogger(this.orgId).error({ elapsedMs: Date.now() - started, code: 'OTP_SEND_FAILED' }, 'Official OTP operational send failed')
       throw err
