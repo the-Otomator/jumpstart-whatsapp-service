@@ -133,11 +133,11 @@ export class SenderPool {
   }
 
   private async sendOfficialOtp(req: SendMessageRequest): Promise<string> {
-    await assertPaymentAllowsSend(this.orgId)
     const started = Date.now()
     const controller = new AbortController()
     this.officialOtpInFlight++
     try {
+      await assertPaymentAllowsSend(this.orgId)
       const result = await withTimeout(
         (async () => {
           const provider = getMetaCloudProvider()
@@ -157,6 +157,7 @@ export class SenderPool {
       orgLogger(this.orgId).info({ elapsedMs: Date.now() - started, messageId: result }, 'Official OTP provider accepted')
       return result
     } catch (err) {
+      if (err instanceof PaymentRestrictedError) throw err
       this.onSendFailure((err as Error).message)
       orgLogger(this.orgId).error({ elapsedMs: Date.now() - started, code: 'OTP_SEND_FAILED' }, 'Official OTP operational send failed')
       throw err
