@@ -37,8 +37,10 @@ async function runProcess(phase: string) {
     assert.equal(send.mock.callCount(), 1)
     assert.equal(pool.getStatus().queueDepth.marketing, 0)
     const queueDir = path.join('sessions', orgId, 'send-queue')
-    const outcomes = fs.readdirSync(queueDir).map(file => JSON.parse(fs.readFileSync(path.join(queueDir, file), 'utf8')).outcome)
-    assert.deepEqual(outcomes.sort(), ['restricted', 'sent'])
+    const outcomes = fs.readdirSync(queueDir).map(file => JSON.parse(fs.readFileSync(path.join(queueDir, file), 'utf8')))
+    assert.deepEqual(outcomes.map(entry => entry.outcome).sort(), ['restricted', 'sent'])
+    assert.equal(outcomes.find(entry => entry.outcome === 'restricted')?.status, 'skipped')
+    assert.equal(outcomes.find(entry => entry.outcome === 'restricted')?.reason, 'restricted')
   }
 }
 
