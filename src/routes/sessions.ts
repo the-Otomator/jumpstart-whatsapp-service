@@ -29,6 +29,7 @@ import { reconcileSessions, type WaDeviceRow } from '../lib/waDeviceReconcile'
 import { isValidWebhookUrl, redactWebhookUrl, WEBHOOK_URL_REQUIRED } from '../lib/webhookUrl'
 import { sendWhatsAppMessage } from './messages'
 import { PaymentRestrictedError } from '../lib/paymentRestriction'
+import { assertOutboxSendGate } from '../lib/outboxSendGate'
 
 const router = Router()
 
@@ -261,6 +262,7 @@ router.patch(
 // ── Send text (alias for `POST /api/messages/send` with orgId in path) ──
 router.post(
   '/:orgId/send',
+  assertOutboxSendGate,
   validateParams(orgIdParamsSchema),
   validateBody(sessionPathSendBodySchema),
   async (req: Request, res: Response) => {
