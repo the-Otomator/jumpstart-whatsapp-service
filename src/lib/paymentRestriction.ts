@@ -29,6 +29,8 @@ export async function isPaymentRestricted(
 
     const decision = await client.rpc('payment_restricted_outbound_blocked', { p_org_id: orgId })
       .abortSignal(signal)
+    // The database migration and service rollout are separate release steps.
+    if (decision.error?.code === 'PGRST202' || decision.error?.code === '42883') return false
     if (decision.error || typeof decision.data !== 'boolean') throw new Error('decision_unavailable')
     return decision.data
   } catch (error) {

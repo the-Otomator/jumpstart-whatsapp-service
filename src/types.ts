@@ -50,6 +50,8 @@ export interface SendMessageRequest {
   lane?: MessageLane
   /** When true with marketing lane, return immediately after enqueue (async send). */
   enqueue?: boolean
+  /** Existing caller validity deadline for asynchronous sends, when provided. */
+  expiresAt?: string
   message?: string // text content or caption for media
   mediaUrl?: string // URL to download media from
   mediaBase64?: string // direct base64-encoded media

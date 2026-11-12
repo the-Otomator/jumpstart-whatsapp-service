@@ -53,6 +53,7 @@ router.post('/send', validateBody(sendMessageSchema), async (req: Request, res: 
     await assertDeviceCanSend(body.orgId)
     if (body.enqueue && lane === 'marketing') {
       await assertPaymentAllowsSend(body.orgId)
+      if (body.mediaUrl) assertSafeOutboundUrl(body.mediaUrl)
       const pool = getSenderPool(body.orgId)
       const jobId = pool.enqueue(body, 'marketing')
       log.info({ to: body.to, type: body.type, jobId, lane }, 'Message enqueued')
@@ -101,6 +102,7 @@ router.post('/send-bulk', validateBody(sendBulkSchema), async (req: Request, res
       await assertDeviceCanSend(msg.orgId)
       if (msg.enqueue && lane === 'marketing') {
         await assertPaymentAllowsSend(msg.orgId)
+        if (msg.mediaUrl) assertSafeOutboundUrl(msg.mediaUrl)
         const pool = getSenderPool(msg.orgId)
         const jobId = pool.enqueue(msg, 'marketing')
         results.push({ to: msg.to, success: true, jobId, queued: true })

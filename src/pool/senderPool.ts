@@ -4,6 +4,7 @@ import { loadSessionMeta } from '../lib/sessionStore'
 import { postWebhook } from '../lib/webhookDispatcher'
 import { sendWhatsAppMessageDirect } from '../lib/sendDirect'
 import { assertPaymentAllowsSend, PaymentRestrictedError } from '../lib/paymentRestriction'
+import { recordSenderJobOutcome, restoreSenderJobs, storeSenderJob } from './durableSenderQueue'
 import { WA_ENQUEUE_CEILING_MS, WA_SEND_TIMEOUT_MS, withTimeout } from '../lib/withTimeout'
 import { getProviderForOrg, getMetaCloudProvider } from '../providers'
 import { isOfficialOtp, OTP_SEND_BUDGET_MS } from '../lib/officialOtp'
@@ -51,12 +52,16 @@ export class SenderPool {
   private processing = false
   private processorTimer: ReturnType<typeof setTimeout> | null = null
   private officialOtpInFlight = 0
+  private paymentRetryAt = 0
 
   constructor(orgId: string) {
     this.orgId = orgId
     this.state = resetMarketingDayIfNeeded(loadPoolState(orgId))
     this.maybeAdvanceWarmup()
     savePoolState(this.state)
+    for (const job of restoreSenderJobs(orgId)) {
+      this.marketingQueue.push({ ...job, durable: true, resolve: () => {}, reject: () => {} })
+    }
   }
 
   getStatus(): PoolStatusResponse {
@@ -78,6 +83,10 @@ export class SenderPool {
       health: { ...this.state.health },
       rateConfig: { ...DEFAULT_WA_SENDER_RATE_CONFIG },
     }
+  }
+
+  resumeRestoredWork(): void {
+    if (this.marketingQueue.some(job => job.durable)) this.scheduleProcess()
   }
 
   estimateCapacity(req: CapacityEstimateRequest): CapacityEstimateResponse {
@@ -123,6 +132,10 @@ export class SenderPool {
 
       if (lane === 'operational') {
         this.operationalQueue.push(job)
+        if (this.processorTimer && this.paymentRetryAt > Date.now()) {
+          clearTimeout(this.processorTimer)
+          this.processorTimer = null
+        }
       } else {
         this.marketingQueue.push(job)
       }
@@ -173,9 +186,11 @@ export class SenderPool {
       req,
       lane,
       enqueuedAt: Date.now(),
+      durable: true,
       resolve: () => {},
       reject: () => {},
     }
+    storeSenderJob(this.orgId, job)
     this.marketingQueue.push(job)
     this.scheduleProcess()
     return jobId
@@ -218,10 +233,11 @@ export class SenderPool {
 
   private scheduleProcess(): void {
     if (this.processorTimer) return
+    const delay = this.operationalQueue.length > 0 ? 0 : Math.max(0, this.paymentRetryAt - Date.now())
     this.processorTimer = setTimeout(() => {
       this.processorTimer = null
       void this.processQueue()
-    }, 0)
+    }, delay)
   }
 
   private async processQueue(): Promise<void> {
@@ -256,17 +272,35 @@ export class SenderPool {
         try {
           await assertPaymentAllowsSend(job.req.orgId)
           if (job.cancelled) continue
+          if (job.durable && job.req.expiresAt && Date.parse(job.req.expiresAt) <= Date.now()) {
+            recordSenderJobOutcome(this.orgId, job.id, job.paymentHeld ? 'restricted' : 'expired')
+            orgLogger(this.orgId).info({ jobId: job.id, reason: job.paymentHeld ? 'restricted' : 'expired' }, 'WhatsApp queued job expired')
+            continue
+          }
+          // An interrupted provider request may have delivered. Rehydrate only
+          // jobs that were still pending when the process stopped.
+          if (job.durable) recordSenderJobOutcome(this.orgId, job.id, 'sending')
           const messageId = await withTimeout(
             sendWhatsAppMessageDirect(job.req),
             WA_SEND_TIMEOUT_MS,
             'send_timeout'
           )
           this.onSendSuccess(job.lane)
+          if (job.durable) recordSenderJobOutcome(this.orgId, job.id, 'sent')
           job.resolve(messageId)
         } catch (err) {
           if (err instanceof PaymentRestrictedError) {
-            // JumpStart retains durable items. Standalone queue jobs have no outbox reference.
             orgLogger(this.orgId).info({ jobId: job.id, reason: 'restricted' }, 'WhatsApp send refused by payment policy')
+            if (job.durable) {
+              for (const pending of [job, ...this.marketingQueue]) {
+                if (!pending.durable || pending.paymentHeld) continue
+                pending.paymentHeld = true
+                storeSenderJob(this.orgId, pending)
+              }
+              this.paymentRetryAt = Date.now() + 30_000
+              this.requeueFront(job)
+              continue
+            }
             job.reject(err)
             continue
           }
@@ -279,6 +313,7 @@ export class SenderPool {
             getProviderForOrg(this.orgId)?.onSendTimeout?.(this.orgId)
           }
           this.onSendFailure(msg)
+          if (job.durable) recordSenderJobOutcome(this.orgId, job.id, 'failed')
           job.reject(err as Error)
 
           if (this.state.paused) break
@@ -313,7 +348,7 @@ export class SenderPool {
     if (this.operationalQueue.length > 0) {
       return this.operationalQueue.shift()
     }
-    if (this.marketingQueue.length > 0) {
+    if (this.marketingQueue.length > 0 && Date.now() >= this.paymentRetryAt) {
       return this.marketingQueue.shift()
     }
     return undefined
