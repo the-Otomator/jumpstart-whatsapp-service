@@ -13,6 +13,7 @@ import { assertPaymentAllowsSend, PaymentRestrictedError } from '../lib/paymentR
 
 import { assertDeviceCanSend } from '../lib/deviceSendPolicy'
 import { resolveSendChannel } from '../lib/sendDirect'
+import { assertOutboxSendGate } from '../lib/outboxSendGate'
 
 const router = Router()
 
@@ -45,7 +46,7 @@ router.get('/pool-status/:orgId', async (req: Request, res: Response) => {
 })
 
 // ── Send single message ─────────────────────────────────────────
-router.post('/send', validateBody(sendMessageSchema), async (req: Request, res: Response) => {
+router.post('/send', assertOutboxSendGate, validateBody(sendMessageSchema), async (req: Request, res: Response) => {
   const body = req.body as SendMessageRequest
   const log = orgLogger(body.orgId)
   const lane = body.lane ?? 'operational'
@@ -85,7 +86,7 @@ router.post('/send', validateBody(sendMessageSchema), async (req: Request, res: 
 })
 
 // ── Send bulk messages ──────────────────────────────────────────
-router.post('/send-bulk', validateBody(sendBulkSchema), async (req: Request, res: Response) => {
+router.post('/send-bulk', assertOutboxSendGate, validateBody(sendBulkSchema), async (req: Request, res: Response) => {
   const messages = req.body as SendMessageRequest[]
   const results: {
     to: string

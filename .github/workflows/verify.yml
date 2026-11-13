@@ -54,7 +54,7 @@ jobs:
 
           core.setOutput(''base_sha'',pr.base.sha);
 
-          const glob = p => new RegExp(''^''+p.replace(/[.+^${}()|[\]\\]/g,''\\$&'').replace(/\*\*/g,''@@'').replace(/\*/g,''[^/]*'').replace(/@@/g,''.*'')+''$'');
+          const pathGlob = p => new RegExp(''^''+p.replace(/[.+^${}()|[\]\\]/g,''\\$&'').replace(/\*\*/g,''@@'').replace(/\*/g,''[^/]*'').replace(/@@/g,''.*'')+''$'');
 
           const broadMoney = paths.some(p=>/billing|payment|checkout|sumit|allowance|supabase\/(_shared|functions\/_shared|migrations)|package(-lock)?\.json|\.github\//i.test(p));
 
@@ -62,7 +62,7 @@ jobs:
           local integration","paths":[],"core":false,"money":false}];
 
           for (let i=0;i<suites.length;i++) { const s=suites[i]; core.setOutput(''s''+i,String(s.core || (s.money && broadMoney) || !s.paths.length
-          || paths.some(p=>s.paths.some(g=>glob(g).test(p))))); }
+          || paths.some(p=>s.paths.some(g=>pathGlob(g).test(p))))); }
 
           '
   suite_0:

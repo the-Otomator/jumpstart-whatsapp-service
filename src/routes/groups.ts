@@ -22,6 +22,7 @@ import { toJid, jidToPhone } from '../lib/phone'
 import { contactPhoneDigits } from '../lib/groupInbound'
 import { orgLogger } from '../lib/logger'
 import { assertSafeOutboundUrl } from '../lib/webhookDispatcher'
+import { assertOutboxSendGate } from '../lib/outboxSendGate'
 import type {
   GroupCreateRequest,
   GroupParticipantsRequest,
@@ -287,6 +288,7 @@ router.post(
 // ΓöÇΓöÇ POST /api/groups/:orgId/:groupJid/send ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 router.post(
   '/:orgId/:groupJid/send',
+  assertOutboxSendGate,
   validateParams(groupParamsSchema),
   validateBody(groupSendSchema),
   async (req: Request, res: Response) => {
