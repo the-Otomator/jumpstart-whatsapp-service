@@ -12,6 +12,7 @@ import { assertSafeOutboundUrl } from '../lib/webhookDispatcher'
 import { assertPaymentAllowsSend, PaymentRestrictedError } from '../lib/paymentRestriction'
 
 import { assertDeviceCanSend } from '../lib/deviceSendPolicy'
+import { resolveSendChannel } from '../lib/sendDirect'
 
 const router = Router()
 
@@ -62,8 +63,9 @@ router.post('/send', validateBody(sendMessageSchema), async (req: Request, res: 
     }
 
     const messageId = await sendWhatsAppMessage(body)
-    log.info({ to: body.to, type: body.type, messageId, lane }, 'Message sent')
-    res.json({ success: true, messageId, lane })
+    const channel = resolveSendChannel(body)
+    log.info({ to: body.to, type: body.type, messageId, lane, channel }, 'Message sent')
+    res.json({ success: true, messageId, lane, channel })
   } catch (err) {
     if (err instanceof PaymentRestrictedError) {
       res.status(423).json({ error: 'restricted', code: 'PAYMENT_RESTRICTED' })

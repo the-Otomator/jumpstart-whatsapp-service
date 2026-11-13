@@ -1,9 +1,10 @@
 import { getHaRuntime } from './ha/coordinator'
-import type { Session } from './types'
+import type { Session, WaChannel } from './types'
 import {
   getProvider,
   getProviderForOrg,
   getAllProviders,
+  listOrgChannelSessions,
   type ProviderType,
 } from './providers'
 import { BaileysProvider } from './providers/baileys/baileysProvider'
@@ -11,15 +12,23 @@ import { MetaCloudProvider } from './providers/meta-cloud/metaCloudProvider'
 import makeWASocket from '@whiskeysockets/baileys'
 import { requireWebhookUrl, WebhookUrlRequiredError } from './lib/webhookUrl'
 import { getSenderPool } from './pool'
+import { channelFromProvider, parseWaChannel, providerFromChannel } from './lib/waChannel'
 
 export async function startSession(
   orgId: string,
   webhookUrl?: string,
   providerType: ProviderType = 'baileys',
-  metaConfig?: { accessToken?: string; phoneNumberId?: string; wabaId?: string }
+  metaConfig?: { accessToken?: string; phoneNumberId?: string; wabaId?: string },
+  channel?: WaChannel
 ): Promise<void> {
   // Reject before any provider/socket work when webhook target is missing or invalid.
   requireWebhookUrl(webhookUrl)
+
+  const resolvedChannel = channel ?? channelFromProvider(providerType)
+  const expectedProvider = providerFromChannel(resolvedChannel)
+  if (expectedProvider !== providerType) {
+    throw new Error(`channel=${resolvedChannel} requires provider=${expectedProvider}`)
+  }
 
   const provider = getProvider(providerType)
   // For meta-cloud, the start() method accepts config as 3rd argument
@@ -30,25 +39,29 @@ export async function startSession(
   }
 }
 
-export function getStatus(orgId: string): Session | undefined {
-  const provider = getProviderForOrg(orgId)
-  return provider?.getStatus(orgId)
+export function getStatus(orgId: string, channel?: WaChannel): Session | undefined {
+  if (channel) {
+    return getProviderForOrg(orgId, channel)?.getStatus(orgId, channel)
+  }
+  return getProviderForOrg(orgId)?.getStatus(orgId)
 }
 
 export async function recoverDisconnectedSessions(): Promise<void> {
   await (getProvider('baileys') as BaileysProvider).recoverDisconnectedSessions()
 }
 
-export function getQR(orgId: string): string | undefined {
-  const provider = getProviderForOrg(orgId)
-  return provider?.getQR(orgId)
+export function getQR(orgId: string, channel?: WaChannel): string | undefined {
+  const ch = channel ?? 'phone'
+  const provider = getProviderForOrg(orgId, ch)
+  return provider?.getQR(orgId, ch)
 }
 
-export async function stopSession(
+async function stopOneChannel(
   orgId: string,
+  channel: WaChannel,
   options?: { keepAuthFiles?: boolean; purgeAuthDir?: boolean }
 ): Promise<void> {
-  const provider = getProviderForOrg(orgId) ?? getProvider('baileys')
+  const provider = getProviderForOrg(orgId, channel) ?? getProvider(providerFromChannel(channel))
   const ha = getHaRuntime()
   if (ha && provider.type === 'baileys') {
     await ha.transition(orgId, async () => {
@@ -60,7 +73,29 @@ export async function stopSession(
       await (provider as BaileysProvider).closeHaSocket(orgId)
       provider.stop(orgId, options)
     })
-  } else provider.stop(orgId, options)
+  } else {
+    provider.stop(orgId, options)
+  }
+}
+
+export async function stopSession(
+  orgId: string,
+  options?: { keepAuthFiles?: boolean; purgeAuthDir?: boolean; channel?: WaChannel }
+): Promise<void> {
+  if (options?.channel) {
+    await stopOneChannel(orgId, options.channel, options)
+    return
+  }
+
+  const live = listOrgChannelSessions(orgId)
+  if (live.length === 0) {
+    await stopOneChannel(orgId, 'phone', options)
+    return
+  }
+  for (const session of live) {
+    const ch = session.channel ?? channelFromProvider(session.provider)
+    await stopOneChannel(orgId, ch, options)
+  }
 }
 
 export async function migrateSession(
@@ -89,10 +124,13 @@ export function getBaileysSocket(orgId: string): ReturnType<typeof makeWASocket>
  */
 export async function updateSessionWebhook(
   orgId: string,
-  webhookUrl: string
+  webhookUrl: string,
+  channel?: WaChannel
 ): Promise<{ previous: string | undefined; next: string }> {
   const resolved = requireWebhookUrl(webhookUrl)
-  const provider = getProviderForOrg(orgId)
+  const provider = channel
+    ? getProviderForOrg(orgId, channel)
+    : getProviderForOrg(orgId)
   if (!provider) {
     throw new Error(`Session ${orgId} not found`)
   }
@@ -122,4 +160,4 @@ export async function restoreSessions(): Promise<void> {
   }
 }
 
-export { WebhookUrlRequiredError }
+export { WebhookUrlRequiredError, parseWaChannel }

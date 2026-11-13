@@ -24,6 +24,7 @@ const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`
 
 export class MetaCloudProvider implements WhatsAppProvider {
   readonly type: ProviderType = 'meta-cloud'
+  readonly channel = 'official' as const
 
   private sessions = new Map<string, Session>()
   private configs = new Map<string, MetaCloudConfig>()
@@ -64,8 +65,8 @@ export class MetaCloudProvider implements WhatsAppProvider {
     this.configs.set(OFFICIAL_OTP_SESSION, { accessToken: secret.access_token,
       phoneNumberId: account.phone_number_id, wabaId: account.waba_id, webhookUrl })
     this.sessions.set(OFFICIAL_OTP_SESSION, { orgId: OFFICIAL_OTP_SESSION, provider: 'meta-cloud',
-      status: 'connected', phoneNumber: '972555040363', webhookUrl })
-    saveSessionMeta({ orgId: OFFICIAL_OTP_SESSION, provider: 'meta-cloud', autoRestore: true,
+      channel: 'official', status: 'connected', phoneNumber: '972555040363', webhookUrl })
+    saveSessionMeta({ orgId: OFFICIAL_OTP_SESSION, provider: 'meta-cloud', channel: 'official', autoRestore: true,
       webhookUrl, createdAt: new Date().toISOString(), lastConnected: new Date().toISOString(),
       phoneNumber: '972555040363', metaPhoneNumberId: account.phone_number_id,
       metaWabaId: account.waba_id, metaAccessToken: secret.access_token })
@@ -107,6 +108,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
     const session: Session = {
       orgId,
       provider: 'meta-cloud',
+      channel: 'official',
       status: 'connected',  // Meta Cloud is immediately connected (no QR)
       phoneNumber: phoneInfo.display_phone_number?.replace(/[^0-9]/g, ''),
       webhookUrl: resolvedWebhookUrl,
@@ -120,6 +122,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
     saveSessionMeta({
       orgId,
       provider: 'meta-cloud',
+      channel: 'official',
       webhookUrl: resolvedWebhookUrl,
       createdAt: new Date().toISOString(),
       phoneNumber: session.phoneNumber,
@@ -141,17 +144,21 @@ export class MetaCloudProvider implements WhatsAppProvider {
     this.configs.delete(orgId)
 
     if (!options?.keepAuthFiles) {
-      deleteSessionMeta(orgId)
+      deleteSessionMeta(orgId, 'official')
     }
 
     log.info('Meta Cloud session stopped')
   }
 
-  getStatus(orgId: string): Session | undefined {
-    return this.sessions.get(orgId)
+  getStatus(orgId: string, channel?: import('../../types').WaChannel): Session | undefined {
+    if (channel && channel !== 'official') return undefined
+    const s = this.sessions.get(orgId)
+    if (!s) return undefined
+    if (!s.channel) s.channel = 'official'
+    return s
   }
 
-  getQR(_orgId: string): string | undefined {
+  getQR(_orgId: string, _channel?: import('../../types').WaChannel): string | undefined {
     return undefined  // Meta Cloud doesn't use QR
   }
 
@@ -199,14 +206,14 @@ export class MetaCloudProvider implements WhatsAppProvider {
     session.lastError = undefined
     const config = this.configs.get(orgId)
     if (config) config.webhookUrl = resolved
-    updateSessionMeta(orgId, { webhookUrl: resolved })
+    updateSessionMeta(orgId, { webhookUrl: resolved }, 'official')
     return { previous, next: resolved }
   }
 
   async restoreSessions(): Promise<void> {
     const orgIds = listStoredSessions()
     for (const orgId of orgIds) {
-      const meta = loadSessionMeta(orgId)
+      const meta = loadSessionMeta(orgId, 'official')
       if (!meta || meta.provider !== 'meta-cloud') continue
 
       const webhookUrl = await resolveSessionWebhookUrl(orgId)
@@ -216,6 +223,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
         this.sessions.set(orgId, {
           orgId,
           provider: 'meta-cloud',
+          channel: 'official',
           status: 'disconnected',
           lastError,
         })
