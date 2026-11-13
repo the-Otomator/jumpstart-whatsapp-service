@@ -8,7 +8,10 @@ import {
   listActiveSessions,
   updateSessionWebhook,
   WebhookUrlRequiredError,
+  parseWaChannel,
 } from '../sessionManager'
+import { buildStatusPayloadFromSessions } from '../lib/waChannel'
+import { listOrgChannelSessions } from '../providers'
 import {
   validateBody,
   validateParams,
@@ -143,7 +146,14 @@ router.post(
   validateBody(startSessionSchema),
   async (req: Request, res: Response) => {
     const { orgId } = req.params
-    const { webhookUrl, provider: providerType, metaAccessToken, metaPhoneNumberId, metaWabaId } = req.body
+    const {
+      webhookUrl,
+      provider: providerType,
+      channel,
+      metaAccessToken,
+      metaPhoneNumberId,
+      metaWabaId,
+    } = req.body
     const log = orgLogger(orgId)
 
     if (!isValidWebhookUrl(webhookUrl)) {
@@ -171,14 +181,28 @@ router.post(
     }
 
     try {
-      await startSession(orgId, webhookUrl, providerType ?? 'baileys', {
-        accessToken: metaAccessToken,
-        phoneNumberId: metaPhoneNumberId,
-        wabaId: metaWabaId,
+      const resolvedProvider = providerType ?? 'baileys'
+      await startSession(
+        orgId,
+        webhookUrl,
+        resolvedProvider,
+        {
+          accessToken: metaAccessToken,
+          phoneNumberId: metaPhoneNumberId,
+          wabaId: metaWabaId,
+        },
+        channel
+      )
+      const resolvedChannel = channel ?? (resolvedProvider === 'meta-cloud' ? 'official' : 'phone')
+      log.info({ provider: resolvedProvider, channel: resolvedChannel }, 'Session start requested')
+      const initialStatus = resolvedProvider === 'meta-cloud' ? 'connected' : 'connecting'
+      res.json({
+        success: true,
+        orgId,
+        status: initialStatus,
+        provider: resolvedProvider,
+        channel: resolvedChannel,
       })
-      log.info({ provider: providerType ?? 'baileys' }, 'Session start requested')
-      const initialStatus = providerType === 'meta-cloud' ? 'connected' : 'connecting'
-      res.json({ success: true, orgId, status: initialStatus, provider: providerType ?? 'baileys' })
     } catch (err) {
       if (err instanceof WebhookUrlRequiredError) {
         res.status(400).json({ error: err.message, code: err.code })
@@ -340,13 +364,14 @@ router.get(
   validateParams(orgIdParamsSchema),
   (req: Request, res: Response) => {
     const { orgId } = req.params
-    const qr = getQR(orgId)
-    const session = getStatus(orgId)
+    const channel = parseWaChannel(req.query.channel) ?? 'phone'
+    const qr = getQR(orgId, channel)
+    const session = getStatus(orgId, channel)
     if (!qr) {
-      res.status(404).json({ qr: null, status: session?.status ?? 'not_found' })
+      res.status(404).json({ qr: null, status: session?.status ?? 'not_found', channel })
       return
     }
-    res.json({ qr, status: 'qr' })
+    res.json({ qr, status: 'qr', channel })
   }
 )
 
@@ -356,17 +381,38 @@ router.get(
   validateParams(orgIdParamsSchema),
   (req: Request, res: Response) => {
     const { orgId } = req.params
-    const session = getStatus(orgId)
-    if (!session) {
-      res.status(404).json({ status: 'not_found', qr: null })
+    const channelFilter = parseWaChannel(req.query.channel)
+    if (channelFilter) {
+      const session = getStatus(orgId, channelFilter)
+      if (!session) {
+        res.status(404).json({ status: 'not_found', qr: null, channel: channelFilter, channels: {} })
+        return
+      }
+      res.json({
+        status: session.status,
+        qr: session.qr ?? null,
+        phoneNumber: session.phoneNumber ?? null,
+        provider: session.provider,
+        channel: channelFilter,
+        channels: {
+          [channelFilter]: {
+            status: session.status,
+            qr: session.qr ?? null,
+            phoneNumber: session.phoneNumber ?? null,
+            provider: session.provider,
+            channel: channelFilter,
+          },
+        },
+      })
       return
     }
-    res.json({
-      status: session.status,
-      qr: session.qr ?? null,
-      phoneNumber: session.phoneNumber ?? null,
-      provider: session.provider,
-    })
+
+    const payload = buildStatusPayloadFromSessions(listOrgChannelSessions(orgId))
+    if (payload.not_found) {
+      res.status(404).json({ status: 'not_found', qr: null, channels: {} })
+      return
+    }
+    res.json(payload)
   }
 )
 
@@ -380,10 +426,11 @@ router.delete(
       req.query.purge === 'true' ||
       req.query.purge === '1' ||
       req.query.wipe === 'true'
+    const channel = parseWaChannel(req.query.channel)
     try {
-      await stopSession(orgId, { purgeAuthDir: purge })
-      orgLogger(orgId).info({ purge }, 'Session stop via API')
-      res.json({ success: true, orgId, purged: purge })
+      await stopSession(orgId, { purgeAuthDir: purge, channel })
+      orgLogger(orgId).info({ purge, channel: channel ?? 'all' }, 'Session stop via API')
+      res.json({ success: true, orgId, purged: purge, channel: channel ?? null })
     } catch (err) { next(err) }
   }
 )

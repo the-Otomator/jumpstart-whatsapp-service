@@ -1,18 +1,29 @@
-import { assertDeviceCanSend } from './deviceSendPolicy'
-import { getProviderForOrg } from '../providers'
+import { getProviderForOrg, getProviderForOrgChannel } from '../providers'
 import type { SendMessageRequest } from '../types'
+import { assertOfficialSendAllowed, pickSendChannel } from './waChannel'
+
+export function resolveSendChannel(req: Pick<SendMessageRequest, 'orgId' | 'lane' | 'channel'>) {
+  const official = getProviderForOrgChannel(req.orgId, 'official')?.getStatus(req.orgId, 'official')
+  const phone = getProviderForOrgChannel(req.orgId, 'phone')?.getStatus(req.orgId, 'phone')
+  return pickSendChannel(req, {
+    phone: !!phone,
+    official: official?.status === 'connected',
+  })
+}
 
 /** Low-level send — bypasses throttle pool (used by pool worker only). */
 export async function sendWhatsAppMessageDirect(req: SendMessageRequest): Promise<string> {
-  const provider = getProviderForOrg(req.orgId)
-  if (!provider) throw new Error(`Session ${req.orgId} not connected`)
+  const channel = resolveSendChannel(req)
+  assertOfficialSendAllowed(req, channel)
 
-  const status = provider.getStatus(req.orgId)
+  const provider = getProviderForOrg(req.orgId, channel)
+  if (!provider) throw new Error(`Session ${req.orgId} channel=${channel} not connected`)
+
+  const status = provider.getStatus(req.orgId, channel)
   if (!status || status.status !== 'connected') {
-    throw new Error(`Session ${req.orgId} not connected`)
+    throw new Error(`Session ${req.orgId} channel=${channel} not connected`)
   }
 
-  await assertDeviceCanSend(req.orgId)
-  const result = await provider.sendMessage(req)
+  const result = await provider.sendMessage({ ...req, channel })
   return result.messageId
 }

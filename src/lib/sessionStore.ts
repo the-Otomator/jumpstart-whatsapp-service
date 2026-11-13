@@ -1,11 +1,14 @@
 import fs from 'fs'
 import path from 'path'
 import { logger } from './logger'
+import type { WaChannel } from '../types'
 
 export interface SessionMeta {
   orgId: string
   /** Defaults to Baileys when missing (existing installs). */
   provider?: 'baileys' | 'meta-cloud'
+  /** phone ↔ baileys, official ↔ meta-cloud. Inferred from provider when missing (migration). */
+  channel?: WaChannel
   webhookUrl?: string
   createdAt: string
   phoneNumber?: string
@@ -15,6 +18,12 @@ export interface SessionMeta {
   metaPhoneNumberId?: string
   metaAccessToken?: string
   metaWabaId?: string
+}
+
+function withChannel(meta: SessionMeta): SessionMeta {
+  if (meta.channel === 'phone' || meta.channel === 'official') return meta
+  const channel: WaChannel = meta.provider === 'meta-cloud' ? 'official' : 'phone'
+  return { ...meta, channel }
 }
 
 const SESSIONS_DIR = (): string => path.join(process.cwd(), 'sessions')
@@ -31,58 +40,139 @@ export function hasStoredLoginIdentity(orgId: string): boolean {
   }
 }
 
-function metaPath(orgId: string): string {
+function legacyMetaPath(orgId: string): string {
   return path.join(SESSIONS_DIR(), orgId, 'meta.json')
 }
 
-/** Save session metadata to disk */
-export function saveSessionMeta(meta: SessionMeta): void {
-  const dir = path.join(SESSIONS_DIR(), meta.orgId)
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-
-  fs.writeFileSync(metaPath(meta.orgId), JSON.stringify(meta, null, 2), 'utf-8')
-  logger.debug({ orgId: meta.orgId }, 'Session metadata saved')
+function channelMetaPath(orgId: string, channel: WaChannel): string {
+  return path.join(SESSIONS_DIR(), orgId, `meta.${channel}.json`)
 }
 
-/** Load session metadata from disk */
-export function loadSessionMeta(orgId: string): SessionMeta | null {
-  const filePath = metaPath(orgId)
+function readJsonMeta(filePath: string): SessionMeta | null {
   if (!fs.existsSync(filePath)) return null
-
   try {
-    const raw = fs.readFileSync(filePath, 'utf-8')
-    return JSON.parse(raw) as SessionMeta
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as SessionMeta
   } catch (err) {
-    logger.warn({ orgId, err }, 'Failed to read session metadata')
+    logger.warn({ filePath, err }, 'Failed to read session metadata')
     return null
   }
 }
 
+/**
+ * One-time migrate legacy `meta.json` → `meta.<channel>.json` without touching Baileys creds
+ * (no reconnect). Safe to call on every load.
+ */
+function migrateLegacyMetaFile(orgId: string): void {
+  const legacy = legacyMetaPath(orgId)
+  if (!fs.existsSync(legacy)) return
+  const raw = readJsonMeta(legacy)
+  if (!raw) return
+  const normalized = withChannel(raw)
+  const channel = normalized.channel!
+  const dest = channelMetaPath(orgId, channel)
+  if (!fs.existsSync(dest)) {
+    fs.writeFileSync(dest, JSON.stringify(normalized, null, 2), 'utf-8')
+    logger.info({ orgId, channel }, 'Migrated legacy meta.json to channel file')
+  }
+  try {
+    fs.unlinkSync(legacy)
+  } catch {
+    // leave legacy if unlink fails; channel file is source of truth
+  }
+}
+
+/** Save session metadata to disk (channel-scoped file). */
+export function saveSessionMeta(meta: SessionMeta): void {
+  const normalized = withChannel(meta)
+  const channel = normalized.channel!
+  const dir = path.join(SESSIONS_DIR(), normalized.orgId)
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+
+  migrateLegacyMetaFile(normalized.orgId)
+  fs.writeFileSync(channelMetaPath(normalized.orgId, channel), JSON.stringify(normalized, null, 2), 'utf-8')
+  logger.debug({ orgId: normalized.orgId, channel }, 'Session metadata saved')
+}
+
+/**
+ * Load session metadata.
+ * - With channel: that channel only.
+ * - Without channel: phone first, then official (legacy single-session callers / Baileys).
+ */
+export function loadSessionMeta(orgId: string, channel?: WaChannel): SessionMeta | null {
+  migrateLegacyMetaFile(orgId)
+
+  if (channel) {
+    const meta = readJsonMeta(channelMetaPath(orgId, channel))
+    return meta ? withChannel(meta) : null
+  }
+
+  const phone = readJsonMeta(channelMetaPath(orgId, 'phone'))
+  if (phone) return withChannel(phone)
+
+  const official = readJsonMeta(channelMetaPath(orgId, 'official'))
+  if (official) return withChannel(official)
+
+  // Legacy path if migrate could not run (e.g. empty parse)
+  const legacy = readJsonMeta(legacyMetaPath(orgId))
+  return legacy ? withChannel(legacy) : null
+}
+
 /** Update specific fields in session metadata */
-export function updateSessionMeta(orgId: string, updates: Partial<SessionMeta>): void {
-  const existing = loadSessionMeta(orgId)
+export function updateSessionMeta(
+  orgId: string,
+  updates: Partial<SessionMeta>,
+  channel?: WaChannel
+): void {
+  const existing = loadSessionMeta(orgId, channel ?? updates.channel)
   if (!existing) return
 
-  const updated = { ...existing, ...updates }
+  const updated = withChannel({ ...existing, ...updates, orgId })
   saveSessionMeta(updated)
 }
 
-/** Delete session metadata from disk */
-export function deleteSessionMeta(orgId: string): void {
-  const filePath = metaPath(orgId)
+/** Delete session metadata for one channel (default: phone for back-compat). */
+export function deleteSessionMeta(orgId: string, channel: WaChannel = 'phone'): void {
+  migrateLegacyMetaFile(orgId)
+  const filePath = channelMetaPath(orgId, channel)
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath)
-    logger.debug({ orgId }, 'Session metadata deleted')
+    logger.debug({ orgId, channel }, 'Session metadata deleted')
+  }
+  // Clean leftover legacy if it matched this channel
+  const legacy = readJsonMeta(legacyMetaPath(orgId))
+  if (legacy && withChannel(legacy).channel === channel) {
+    try {
+      fs.unlinkSync(legacyMetaPath(orgId))
+    } catch {
+      /* ignore */
+    }
   }
 }
 
-/** Remove `sessions/<orgId>` (creds, meta, keys) — next pairing needs a new QR scan */
+/**
+ * Remove Baileys auth material for an org without wiping the official Meta channel.
+ * Deletes creds/keys under `sessions/<orgId>/` and phone meta; keeps `meta.official.json`.
+ */
 export function deleteSessionAuthDir(orgId: string): void {
   const dir = path.join(SESSIONS_DIR(), orgId)
-  if (fs.existsSync(dir)) {
-    fs.rmSync(dir, { recursive: true, force: true })
-    logger.debug({ orgId }, 'Session directory removed')
+  if (!fs.existsSync(dir)) return
+
+  migrateLegacyMetaFile(orgId)
+  const officialMeta = readJsonMeta(channelMetaPath(orgId, 'official'))
+
+  // Remove baileys artifacts but preserve official meta across recreate.
+  for (const name of fs.readdirSync(dir)) {
+    if (name === 'meta.official.json') continue
+    fs.rmSync(path.join(dir, name), { recursive: true, force: true })
   }
+
+  if (officialMeta) {
+    saveSessionMeta(officialMeta)
+  } else if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0) {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+
+  logger.debug({ orgId }, 'Phone session directory purged (official meta preserved if present)')
 }
 
 /** List all org IDs that have session directories (for auto-restore) */
@@ -92,9 +182,13 @@ export function listStoredSessions(): string[] {
 
   return fs.readdirSync(root).filter((name) => {
     const dir = path.join(root, name)
+    if (!fs.statSync(dir).isDirectory()) return false
+    migrateLegacyMetaFile(name)
     return (
-      fs.statSync(dir).isDirectory() &&
-      (fs.existsSync(path.join(dir, 'creds.json')) || fs.existsSync(path.join(dir, 'meta.json')))
+      fs.existsSync(path.join(dir, 'creds.json')) ||
+      fs.existsSync(path.join(dir, 'meta.json')) ||
+      fs.existsSync(path.join(dir, 'meta.phone.json')) ||
+      fs.existsSync(path.join(dir, 'meta.official.json'))
     )
   })
 }
@@ -108,6 +202,8 @@ export function migrateSessionAuthDir(fromOrgId: string, toOrgId: string): void 
     logger.warn({ fromOrgId }, 'migrateSessionAuthDir: same org, skipping')
     return
   }
+
+  migrateLegacyMetaFile(fromOrgId)
 
   const fromDir = path.join(SESSIONS_DIR(), fromOrgId)
   const toDir = path.join(SESSIONS_DIR(), toOrgId)
@@ -129,11 +225,14 @@ export function migrateSessionAuthDir(fromOrgId: string, toOrgId: string): void 
 
   fs.renameSync(fromDir, toDir)
 
-  const meta = loadSessionMeta(toOrgId)
-  if (meta) {
-    saveSessionMeta({
-      ...meta,
-      orgId: toOrgId,
-    })
+  for (const channel of ['phone', 'official'] as const) {
+    const meta = loadSessionMeta(toOrgId, channel)
+    if (meta) {
+      saveSessionMeta({
+        ...meta,
+        orgId: toOrgId,
+        channel,
+      })
+    }
   }
 }

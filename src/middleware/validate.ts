@@ -27,14 +27,28 @@ export const requiredWebhookUrlSchema = z
 
 // ── Request body schemas ────────────────────────────────────────
 
+export const waChannelSchema = z.enum(['phone', 'official'])
+
 export const startSessionSchema = z.object({
   webhookUrl: webhookUrlSchema,
   autoRestore: z.boolean().optional().default(true),
   provider: z.enum(['baileys', 'meta-cloud']).optional().default('baileys'),
+  /** Optional explicit channel; defaults from provider (baileys→phone, meta-cloud→official). */
+  channel: waChannelSchema.optional(),
   // Meta Cloud optional overrides (if not using env defaults)
   metaAccessToken: z.string().optional(),
   metaPhoneNumberId: z.string().optional(),
   metaWabaId: z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (!data.channel) return
+  const expected = data.channel === 'official' ? 'meta-cloud' : 'baileys'
+  if ((data.provider ?? 'baileys') !== expected) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `channel=${data.channel} requires provider=${expected}`,
+      path: ['channel'],
+    })
+  }
 })
 
 export const updateWebhookSchema = z.object({
@@ -50,6 +64,7 @@ export const sendMessageSchema = z.object({
   orgId: orgIdSchema,
   to: phoneSchema,
   lane: z.enum(['operational', 'marketing']).optional().default('operational'),
+  channel: waChannelSchema.optional(),
   enqueue: z.boolean().optional().default(false),
   expiresAt: z.string().datetime({ offset: true }).optional(),
   type: z.enum(['text', 'image', 'video', 'audio', 'document', 'location', 'contact', 'template']).optional().default('text'),

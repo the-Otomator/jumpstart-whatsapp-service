@@ -103,6 +103,7 @@ export function isSocketOpen(sock: BaileysSocket | undefined): boolean {
 
 export class BaileysProvider implements WhatsAppProvider {
   readonly type: ProviderType = 'baileys'
+  readonly channel = 'phone' as const
 
   private sessions = new Map<string, Session>()
   private sockets = new Map<string, BaileysSocket>()
@@ -165,6 +166,7 @@ export class BaileysProvider implements WhatsAppProvider {
     const session: Session = {
       orgId,
       provider: 'baileys',
+      channel: 'phone',
       status: 'connecting',
       webhookUrl: resolvedWebhookUrl,
       lastError: undefined,
@@ -174,6 +176,7 @@ export class BaileysProvider implements WhatsAppProvider {
     const sharedMeta = {
       orgId,
       provider: 'baileys' as const,
+      channel: 'phone' as const,
       webhookUrl: resolvedWebhookUrl,
       createdAt: new Date().toISOString(),
       autoRestore: true,
@@ -627,7 +630,7 @@ export class BaileysProvider implements WhatsAppProvider {
       log.info('Session stopped — all pairing data removed from disk')
     } else if (!keepAuth) {
       // Persist the opt-out: the socket close can clear the in-memory stop flag.
-      saveSessionMeta({ orgId, provider: 'baileys', createdAt: new Date().toISOString(), autoRestore: false })
+      saveSessionMeta({ orgId, provider: 'baileys', channel: 'phone', createdAt: new Date().toISOString(), autoRestore: false })
       log.info('Session stopped — automatic restore disabled')
     } else {
       log.info('Session stopped (auth files kept for migrate)')
@@ -642,11 +645,16 @@ export class BaileysProvider implements WhatsAppProvider {
     await ha.closeSocket(orgId, sock)
   }
 
-  getStatus(orgId: string): Session | undefined {
-    return this.sessions.get(orgId)
+  getStatus(orgId: string, channel?: import('../../types').WaChannel): Session | undefined {
+    if (channel && channel !== 'phone') return undefined
+    const s = this.sessions.get(orgId)
+    if (!s) return undefined
+    if (!s.channel) s.channel = 'phone'
+    return s
   }
 
-  getQR(orgId: string): string | undefined {
+  getQR(orgId: string, channel?: import('../../types').WaChannel): string | undefined {
+    if (channel && channel !== 'phone') return undefined
     const s = this.sessions.get(orgId)
     return s?.status === 'qr' ? s.qr : undefined
   }
@@ -713,13 +721,14 @@ export class BaileysProvider implements WhatsAppProvider {
     session.webhookUrl = resolved
     session.lastError = undefined
     if (getHaRuntime()) return { previous, next: resolved }
-    updateSessionMeta(orgId, { webhookUrl: resolved })
+    updateSessionMeta(orgId, { webhookUrl: resolved }, 'phone')
     // Ensure meta exists even if updateSessionMeta no-op'd (no prior meta file).
-    const meta = loadSessionMeta(orgId)
+    const meta = loadSessionMeta(orgId, 'phone')
     if (!meta) {
       saveSessionMeta({
         orgId,
         provider: 'baileys',
+        channel: 'phone',
         webhookUrl: resolved,
         createdAt: new Date().toISOString(),
         autoRestore: true,
@@ -738,7 +747,7 @@ export class BaileysProvider implements WhatsAppProvider {
     if (getHaRuntime()) { await this.restoreSessions(); return }
     for (const orgId of listStoredSessions()) {
       const eligible = () => {
-        const meta = loadSessionMeta(orgId)
+        const meta = loadSessionMeta(orgId, 'phone')
         const session = this.sessions.get(orgId)
         return meta?.provider !== 'meta-cloud' && meta?.autoRestore !== false &&
           !this.intentionallyStoppedOrgIds.has(orgId) &&
@@ -775,8 +784,10 @@ export class BaileysProvider implements WhatsAppProvider {
     logger.info({ count: orgIds.length }, 'Restoring sessions from disk')
 
     for (const orgId of orgIds) {
-      const meta = loadSessionMeta(orgId)
+      const meta = loadSessionMeta(orgId, 'phone')
+      // Official-only orgs have meta.official.json but no phone creds — skip quietly.
       if (meta?.provider === 'meta-cloud' || meta?.autoRestore === false) continue
+      if (!meta && !hasStoredLoginIdentity(orgId)) continue
 
       const webhookUrl = await resolveSessionWebhookUrl(orgId)
       if (!webhookUrl) {
@@ -785,6 +796,7 @@ export class BaileysProvider implements WhatsAppProvider {
         this.sessions.set(orgId, {
           orgId,
           provider: 'baileys',
+          channel: 'phone',
           status: 'disconnected',
           lastError,
         })

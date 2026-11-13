@@ -1,4 +1,4 @@
-import type { Session, SendMessageRequest } from '../types'
+import type { Session, SendMessageRequest, WaChannel } from '../types'
 
 export type ProviderType = 'baileys' | 'meta-cloud'
 
@@ -8,11 +8,13 @@ export interface SendResult {
 
 /**
  * Common interface every WhatsApp provider must implement.
- * Baileys is the first (and currently only) implementation.
- * Meta Cloud API will be the second (Phase 2).
+ * Sessions are keyed by orgId within each provider; channel is implied by provider
+ * (baileys=phone, meta-cloud=official) so one org can hold both at once.
  */
 export interface WhatsAppProvider {
   readonly type: ProviderType
+  /** Fixed channel owned by this provider. */
+  readonly channel: WaChannel
 
   /** Start a session (connect to WhatsApp). */
   start(orgId: string, webhookUrl?: string): Promise<void>
@@ -20,11 +22,11 @@ export interface WhatsAppProvider {
   /** Stop a session. */
   stop(orgId: string, options?: { keepAuthFiles?: boolean; purgeAuthDir?: boolean }): void
 
-  /** Get current session status. */
-  getStatus(orgId: string): Session | undefined
+  /** Get current session status. Optional channel must match this provider when passed. */
+  getStatus(orgId: string, channel?: WaChannel): Session | undefined
 
   /** Get QR code (only relevant for Baileys). Returns undefined if not applicable. */
-  getQR(orgId: string): string | undefined
+  getQR(orgId: string, channel?: WaChannel): string | undefined
 
   /** Send a message. */
   sendMessage(req: SendMessageRequest): Promise<SendResult>

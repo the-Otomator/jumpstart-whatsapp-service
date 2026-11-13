@@ -1,8 +1,13 @@
 import type { ProviderType } from './providers/types'
 
+/** Logical send/receive lane per org: phone = Baileys, official = Meta Cloud. */
+export type WaChannel = 'phone' | 'official'
+
 export interface Session {
   orgId: string
   provider: ProviderType
+  /** phone ↔ baileys, official ↔ meta-cloud. Set on start/restore; inferred from provider if missing. */
+  channel?: WaChannel
   status: 'connecting' | 'qr' | 'connected' | 'disconnected'
   qr?: string
   phoneNumber?: string
@@ -48,6 +53,11 @@ export interface SendMessageRequest {
   type: MessageType
   /** Pool priority lane. Defaults to operational for backward compatibility. */
   lane?: MessageLane
+  /**
+   * Explicit connection channel. Overrides lane-based routing when set.
+   * phone = Baileys, official = Meta Cloud (templates).
+   */
+  channel?: WaChannel
   /** When true with marketing lane, return immediately after enqueue (async send). */
   enqueue?: boolean
   /** Existing caller validity deadline for asynchronous sends, when provided. */
