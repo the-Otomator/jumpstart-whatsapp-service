@@ -1,6 +1,7 @@
 import { getHaRuntime } from './ha/coordinator'
 import 'dotenv/config'
 import express from 'express'
+import { startHistoryPullWorker, stopHistoryPullWorker } from './lib/historyPullWorker'
 import cors from 'cors'
 import helmet from 'helmet'
 import { rateLimit } from 'express-rate-limit'
@@ -336,6 +337,7 @@ const server = app.listen(PORT, async () => {
   }
 
   startWaDeviceMonitor()
+  startHistoryPullWorker()
   sessionRecovery.start()
   startMediaPruneScheduler()
   startWebhookAudit()
@@ -346,6 +348,7 @@ setupGracefulShutdown(server, {
   onShutdown: async () => {
     sessionRecovery.stop()
     stopWaDeviceMonitor()
+    stopHistoryPullWorker()
     stopMediaPruneScheduler()
     stopWebhookAudit()
   },
