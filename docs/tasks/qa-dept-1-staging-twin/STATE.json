@@ -1,0 +1,37 @@
+{
+  "slug": "qa-dept-1-staging-twin",
+  "task_id": "e304a098-5c40-44af-b74a-b1309262f68b",
+  "work_task_id": "5dd8b229-97be-40d0-8596-8f36f9ba22af",
+  "phase": "fix_requested",
+  "phases": [
+    "new",
+    "building",
+    "ready_for_cowork",
+    "fix_requested",
+    "approved",
+    "merged",
+    "released",
+    "blocked"
+  ],
+  "round": 2,
+  "emergency": true,
+  "level": "L3/L4",
+  "repos": [
+    {
+      "repo": "the-Otomator/jumpstartapp",
+      "branch": "feature/qa-dept-1-staging-twin",
+      "pr": null,
+      "preview_url": null,
+      "final_sha": null
+    },
+    {
+      "repo": "the-Otomator/jumpstart-whatsapp-service",
+      "branch": "feature/qa-dept-1-staging-twin",
+      "pr": null,
+      "preview_url": null,
+      "final_sha": null
+    }
+  ],
+  "updated_at": "2026-11-10",
+  "updated_by": "cowork"
+}

@@ -1,0 +1,88 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>תוכנית — מחלקת QA</title>
+<style>
+:root{--bg:#f7f6f2;--card:#fff;--ink:#1d1d1b;--mut:#6b6a64;--acc:#0f6b5c;--warn:#b5591a;--bad:#a12a2a;--line:#e3e1da}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,"Segoe UI",Arial,sans-serif}
+main{max-width:1000px;margin:0 auto;padding:28px 16px 60px}
+h1{font-size:28px;margin:0 0 4px}h2{font-size:20px;margin:34px 0 10px;border-bottom:2px solid var(--line);padding-bottom:6px}
+.sub{color:var(--mut)}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:12px 0}
+.stamp{display:inline-block;background:#e3f2ec;color:var(--acc);border:1px solid #9fd3c3;border-radius:8px;padding:4px 12px;font-weight:700;margin:10px 0}
+table{width:100%;border-collapse:collapse;font-size:15px}td,th{border-bottom:1px solid var(--line);padding:8px;text-align:right;vertical-align:top}th{background:#efede6}
+.ok{color:var(--acc);font-weight:600}.no{color:var(--bad);font-weight:600}.mid{color:var(--warn);font-weight:600}
+code{background:#efede6;padding:1px 5px;border-radius:4px;font-size:14px}
+.arch{display:grid;grid-template-columns:1fr 1fr;gap:14px}.col h3{margin:0 0 8px;font-size:16px}
+.box{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:6px 0;text-align:center}
+.box.g{border:2px solid var(--acc)}.box.r{border:2px solid var(--bad)}.down{text-align:center;color:var(--mut);line-height:1}
+.lv{display:inline-block;border-radius:6px;padding:0 7px;font-size:13px;font-weight:700;background:#efede6}
+@media(max-width:760px){.arch{grid-template-columns:1fr}}
+</style></head><body><main>
+<h1>תוכנית — מחלקת QA</h1>
+<div class="sub">מצב 1 — בניה/שדרוג של JumpStart (תשתית) · משימת עבודה: <b>מחלקת QA</b> · 10.11.2026</div>
+<div class="stamp">✓ אושר ע״י ניצן 10.11.2026 — כולל שחרור חירום לכל החבילות</div>
+
+<h2>1 · מה מצב העניין היום</h2>
+<table><tr><th>רכיב</th><th>מצב (נבדק חי 10.11)</th></tr>
+<tr><td>Staging DB של JumpStart (<code>jumpstart-staging</code>)</td><td class="ok">קיים. 6 ארגונים: 3 תאומים סינתטיים (אוטומטור/תנועטף/בייבי שירי), Otomator (Staging), 2 ארגוני QA. Cron כבוי, שליחות קפואות</td></tr>
+<tr><td>תצוגות מקדימות</td><td class="mid">רק ל-Hub, אחת לכל PR. אין כתובת בדיקה קבועה שמרכזת את כל מה שעומד לעלות</td></tr>
+<tr><td>פורטל / פיננסים / אדמין / WhatsApp</td><td class="no">אין סביבת בדיקה</td></tr>
+<tr><td>בדיקות אוטומטיות</td><td class="mid">~487 בדיקות יחידה, verify.yml, billing-safety. בדיקות דפדפן: 2 בלבד (Workforce)</td></tr>
+<tr><td>בדיקות הסוכנים (14 יום)</td><td class="mid">verify: 27 הצליחו · 11 נכשלו · 65 בוטלו. build: 19 ממתינים לך · 10 נכשלו</td></tr>
+<tr><td>כניסת סוכן כמשתמש/לקוח/מדריכה</td><td class="no">לא קיימת בקוד (P1 מ-25.10 לא בוצע)</td></tr>
+<tr><td>זרימת שחרור</td><td class="mid">מיזוג ל-main = פרודקשן מיד. אין שלב בדיקה מרוכז לפני פרודקשן</td></tr></table>
+
+<h2>2 · מה יהיה נכון בסוף</h2>
+<div class="card">
+1. ל-Hub יש ענף <code>staging</code> קבוע בכתובת <code>staging.hub.jumpstart.co.il</code>, עם תאום מנוקה של <b>כל</b> ארגוני הפרודקשן שמתרענן כל לילה.<br>
+2. ב-Staging הכול עובד כמו בפרודקשן: הודעות נשלחות בפועל, אבל <b>רק לטלפון ולמייל שלך</b>. תשלומים עוברים <b>רק במסוף בדיקה</b>.<br>
+3. מחלקת QA בודקת בדפדפן אמיתי כל תפקיד: לקוח קצה, מבקר, מדריכה, עובד ובעל עסק. בכל שחרור רצה חבילה מלאה, ובחירום חבילה קריטית של 5–10 דקות.<br>
+4. שום דבר לא עולה לפרודקשן של ה-Hub בלי QA ירוק. 10 דקות אחרי כל עלייה רצה בדיקת פרודקשן אוטומטית.<br>
+5. ה-QA מוכיח את עצמו: הוא חייב לתפוס באגים מוכרים מהעבר שהוחזרו בכוונה, ובנייה שבורה שנשלחת אליו כל שבוע.</div>
+
+<h2>3 · מה בפנים / מה בחוץ</h2>
+<table><tr><th>בפנים (Q1+Q2 — 4 חבילות)</th><th>בחוץ (שלבים הבאים)</th></tr>
+<tr><td>ענף staging ל-Hub + באנר · תאום לילי של כל הפרודקשן · שליחה לניצן בלבד + מסוף בדיקה · כניסה חד-פעמית לכל תפקיד · מנוע QA + מסלולים + ספריית באגים + קנרי · שער בכל מסלולי השחרור · בדיקת פרודקשן אחרי עלייה · מסכי QA באדמין (תג, דוח ריצה, תאום, בריאות QA, חירום)</td>
+<td>Q3: כשל → קריאה אוטומטית, קריאה → בדיקה משחזרת, דשבורד QA מלא<br>Q4: staging לפורטל, פיננסים, אדמין (באותו פרויקט Staging), WhatsApp (המספר שלך)<br>Q5: השוואת צילומי מסך לילית</td></tr></table>
+
+<h2>4 · איך זה עובד</h2>
+<div class="arch">
+<div class="col"><h3>היום</h3><div class="box">PR + תצוגה מקדימה</div><div class="down">↓</div><div class="box r">מיזוג ל-main = פרודקשן</div><div class="down">↓</div><div class="box">לקוח מגלה את הבאג</div></div>
+<div class="col"><h3>אחרי</h3><div class="box">PR + תצוגה מקדימה + בדיקות יחידה</div><div class="down">↓</div><div class="box">מיזוג לענף staging → כתובת בדיקה קבועה</div><div class="down">↓</div><div class="box g">QA: חבילה מלאה (חירום: קריטית)</div><div class="down">↓ ירוק בלבד</div><div class="box">קידום staging → main (חלון / חירום)</div><div class="down">↓</div><div class="box">בדיקת פרודקשן אוטומטית</div></div></div>
+<div class="card"><b>נתונים:</b> כל לילה הפרודקשן מועתק ל-Staging בקריאה בלבד. השמות, הטלפונים, המיילים והטקסט החופשי מוחלפים, ותמיד באותו ערך בדוי כדי שהבדיקות יהיו יציבות. כרטיסים, מפתחות ספקים, משתמשי Auth ומסמכים פרטיים לא מועתקים.<br>
+<b>הודעות:</b> כל ערוץ (WhatsApp, מייל, SMS, Push) עובר בנקודה אחת בשרת שמחליפה את היעד ליעד שלך ומוסיפה <code>[QA · שם העסק]</code>. WhatsApp נשלח מהמכשיר של Otomator בלבד. אם ההחלפה נכשלת, ההודעה לא נשלחת. כל הודעה ש-QA הפעיל נמסרת לך. אוטומציות שרצות לבד נמסרות רק מהתאומים של אוטומטור, תנועטף ובייבי שירי, עד 100 ביום לכל ערוץ, וכל השאר נרשם ביומן בלבד.<br>
+<b>כל מסלול נבדק בשלוש שכבות:</b> מה רואים במסך, מה נשמר ב-DB, ומה קרה בחוץ: ההודעה נמסרה אליך, או העסקה נקלטה במסוף הבדיקה של SUMIT.</div>
+
+<h2>5 · החלטות שלך — כולן אושרו</h2>
+<table><tr><th>#</th><th>החלטה</th><th>סטטוס</th></tr>
+<tr><td>1</td><td>ענף בדיקה לכל מערכת, וסט מסלולי QA לכל אפליקציה ב-Hub</td><td class="ok">אושר</td></tr>
+<tr><td>2</td><td>תאום מנוקה של כל הפרודקשן, כל לילה</td><td class="ok">אושר</td></tr>
+<tr><td>3</td><td>שער קשיח; בחירום רצה חבילה קריטית של 5–10 דק'</td><td class="ok">אושר</td></tr>
+<tr><td>4</td><td>"ממזגים מה שמוכן" מעכשיו מכוון ל-staging, ופרודקשן רק אחרי QA ירוק</td><td class="ok">אושר</td></tr>
+<tr><td>5</td><td>פרויקט Staging אחד בלבד; האדמין ישתמש בו ב-Q4</td><td class="ok">אושר</td></tr>
+<tr><td>6</td><td>מופע WhatsApp לבדיקה (Q4) על המספר שלך</td><td class="ok">אושר</td></tr>
+<tr><td>7</td><td>מסופי בדיקה; כל ההודעות נשלחות בפועל ללקוח שהטלפון שלו הוא שלך</td><td class="ok">אושר</td></tr>
+<tr><td>8</td><td>WhatsApp נשלח מהמכשיר של Otomator בלבד; תקרה של 100 ביום לכל ערוץ לאוטומציות רקע (3 תאומים)</td><td class="ok">אושר</td></tr>
+<tr><td>9</td><td>ביצוע ב-Codex, 4 חבילות ברצף, שחרור חירום</td><td class="ok">אושר</td></tr></table>
+
+<h2>6 · סיכונים</h2>
+<table><tr><th>סיכון</th><th>רמה</th><th>מה מונע אותו</th></tr>
+<tr><td>הודעה מגיעה ללקוח אמיתי</td><td class="no">גבוה</td><td>החלפת יעד בנקודה אחת בשרת, fail-closed, יעדים מותרים רק שלך, ובדיקת "0 הודעות לאחרים" כל לילה (AC חובה)</td></tr>
+<tr><td>מידע אישי אמיתי ב-Staging</td><td class="no">גבוה</td><td>ניקוי דטרמיניסטי, ובדיקת דליפה על מדגם מול הפרודקשן בכל ריענון. כשלא בטוחים, מחליפים</td></tr>
+<tr><td>חיוב אמיתי</td><td class="no">גבוה</td><td>רק מפתחות של חברת הבדיקה ב-SUMIT; מפתח חי נחסם כבר בעליית השרת</td></tr>
+<tr><td>השער חוסם שחרורים כי QA לא יציב</td><td class="mid">בינוני</td><td>שיעור חוסר יציבות לכל מסלול, הסגר עם סיבה, ובסיס של באגים קיימים (נבדק "אין כשל חדש"). מתג כיבוי באדמין רק בידיך</td></tr>
+<tr><td>ההצפה בטלפון שלך</td><td class="mid">בינוני</td><td>תקרה יומית לאוטומציות רקע. הודעות QA מסומנות <code>[QA]</code></td></tr>
+<tr><td>Staging קטן מדי לתאום מלא</td><td class="mid">בינוני</td><td>ריענון מדורג. שדרוג בתשלום = עצירה ושאלה אליך</td></tr></table>
+
+<h2>7 · איך נבדוק</h2>
+<table><tr><th>מי</th><th>מה</th><th>איפה</th></tr>
+<tr><td>Codex</td><td>כל בדיקות הקבלה של כל חבילה: ריענון פעמיים, 0 דליפות, החלפת יעד וחסימה, שער חוסם אדום ומעביר ירוק, תופס 100% מספריית הבאגים, קנרי נחסם</td><td>Staging + preview</td></tr>
+<tr><td>Cowork</td><td>הליכה עצמאית כלקוח, כמדריכה וכמבקר; בדיקת דליפה חוזרת ב-DB; בדיקת פרודקשן אחרי העלייה</td><td>Staging, DB קריאה, פרודקשן קריאה</td></tr>
+<tr><td>ניצן</td><td>(1) מקבל בטלפון את הודעות <code>[QA]</code> בריצה מלאה, ומספר ההודעות תואם לדוח · (2) נכנס כמדריכה של תאום תנועטף ורואה את היום שלה</td><td>טלפון + staging</td></tr></table>
+
+<h2>8 · שלבים — חבילות ומשימות פיתוח</h2>
+<table><tr><th>#</th><th>חבילה (משימת פיתוח)</th><th>רמה</th><th>מתג / החזרה</th></tr>
+<tr><td>1</td><td><b>QA 1 — סביבת בדיקה ל-Hub</b>: ענף staging + כתובת + באנר, תאום לילי, שליחה לניצן בלבד, מסוף בדיקה, כניסה חד-פעמית לכל תפקיד</td><td><span class="lv">L3/L4</span></td><td>הכול ב-Staging בלבד; Cron נדלק רק אחרי בדיקות ההחלפה</td></tr>
+<tr><td>2</td><td><b>QA 2 — מנוע QA</b>: הרצה על agents-1, חבילה קריטית ומלאה לכל תפקיד, ספריית באגים, קנרי, כיסוי, התאמת הודעות, שמירת ראיות</td><td><span class="lv">L3</span></td><td>לא משפיע על פרודקשן</td></tr>
+<tr><td>3</td><td><b>QA 3 — שער QA בשחרורים</b>: כל מסלולי השחרור דורשים QA ירוק, הכוונת "ממזגים מה שמוכן" ל-staging, בדיקת פרודקשן אחרי עלייה</td><td><span class="lv">L4</span></td><td>מתג שער שמתחיל כבוי ונדלק בשחרור; החזרה = כיבוי המתג (רק ניצן) + revert</td></tr>
+<tr><td>4</td><td><b>QA 4 — מסכי QA באדמין</b>: תג, דוח ריצה, תאום פרודקשן, בריאות QA, דיאלוג חירום, כרטיס בדיקת פרודקשן</td><td><span class="lv">L1</span></td><td>revert של frontend</td></tr></table>
+<div class="card"><b>סדר:</b> 1 → 2 → 3 → 4, ותמיד רק מבצע אחד בכל רגע. <b>עלות:</b> אין שירות חדש בתשלום. Staging, Cloudflare Pages, agents-1 ומכשיר ה-WhatsApp של Otomator כבר קיימים. אם יידרש שדרוג של Staging, Codex יעצור ויבקש אישור עם מחיר.</div>
+</main></body></html>

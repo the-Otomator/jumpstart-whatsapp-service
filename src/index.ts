@@ -9,8 +9,9 @@ import * as os from 'os'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { authMiddleware } from './auth'
+import { qaWhatsAppSend } from './routes/qaWhatsAppSend'
 import sessionRoutes from './routes/sessions'
-import messageRoutes from './routes/messages'
+import messageRoutes, { sendWhatsAppMessage } from './routes/messages'
 import globalmaxRouter from './routes/globalmax'
 import groupRoutes from './routes/groups'
 import contactRoutes from './routes/contacts'
@@ -300,6 +301,7 @@ app.use('/meta-webhook', metaWebhookRoutes)
 app.use('/webhooks/meta', metaWebhooksRouter)
 
 // API routes (auth + rate limit)
+app.post('/api/qa/whatsapp/send', apiLimiter, qaWhatsAppSend(sendWhatsAppMessage))
 app.use('/api', apiLimiter, authMiddleware)
 app.post('/api/connect-token', connectLimiter, createConnectToken)
 app.get('/api/health', detailedHealth)
