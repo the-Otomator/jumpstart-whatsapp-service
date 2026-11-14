@@ -19,7 +19,7 @@ import {
   groupMemberAddModeSchema,
 } from '../middleware/validate'
 import { toJid, jidToPhone } from '../lib/phone'
-import { contactPhoneDigits } from '../lib/groupInbound'
+import { contactPhoneDigits, findSelfParticipant } from '../lib/groupInbound'
 import { orgLogger } from '../lib/logger'
 import { assertSafeOutboundUrl } from '../lib/webhookDispatcher'
 import { assertOutboxSendGate } from '../lib/outboxSendGate'
@@ -381,13 +381,13 @@ router.get(
     if (!sock) return
 
     try {
-      const systemJid = sock.user?.id ?? ''
       const allGroups = await sock.groupFetchAllParticipating()
 
       const groups: ParticipatingGroup[] = []
 
       for (const [groupJid, meta] of Object.entries(allGroups)) {
-        const self = meta.participants.find((p: { id: string; admin?: string | null }) => p.id === systemJid)
+        // Match LID and phone JID — Baileys may store the device as either.
+        const self = findSelfParticipant(meta.participants as Array<{ id: string; phoneNumber?: string | null; lid?: string | null; admin?: string | null }>, sock.user)
         groups.push({
           groupJid,
           subject: meta.subject,
@@ -419,13 +419,12 @@ router.get(
     if (!sock) return
 
     try {
-      const systemJid = sock.user?.id ?? ''
       const allGroups = await sock.groupFetchAllParticipating()
 
       const admined: AdminedGroup[] = []
 
       for (const [groupJid, meta] of Object.entries(allGroups)) {
-        const self = meta.participants.find((p: any) => p.id === systemJid)
+        const self = findSelfParticipant(meta.participants as Array<{ id: string; phoneNumber?: string | null; lid?: string | null; admin?: string | null }>, sock.user)
         if (!self || !self.admin) continue
 
         const admins = meta.participants
