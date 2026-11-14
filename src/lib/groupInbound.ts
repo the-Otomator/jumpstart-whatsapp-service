@@ -95,25 +95,61 @@ export function groupParticipantJids(
   })
 }
 
+export type SystemIdentity = Pick<Contact, 'id' | 'phoneNumber' | 'lid'> & { id?: string | null }
+
+/** Collect LID + phone JID locals for the linked device identity. */
+export function systemIdentityKeys(self?: SystemIdentity | null): Set<string> {
+  const keys = new Set<string>()
+  if (!self) return keys
+  for (const raw of [self.id, self.lid, self.phoneNumber]) {
+    if (!raw) continue
+    keys.add(String(raw))
+    keys.add(jidLocalPart(String(raw)))
+  }
+  const phone = contactPhoneDigits(self)
+  if (phone) {
+    keys.add(phone)
+    keys.add(`${phone}@s.whatsapp.net`)
+  }
+  return keys
+}
+
+/**
+ * Match the linked device in a group roster whether Baileys stored us as LID,
+ * phone JID, or a Contact with phoneNumber/lid aliases.
+ */
+export function findSelfParticipant<T extends { id: string; phoneNumber?: string | null; lid?: string | null }>(
+  participants: T[],
+  self?: SystemIdentity | null,
+): T | undefined {
+  const keys = systemIdentityKeys(self)
+  if (!keys.size) return undefined
+  const selfPhone = contactPhoneDigits(self ?? null)
+  return participants.find((p) => {
+    for (const raw of [p.id, p.phoneNumber, p.lid]) {
+      if (!raw) continue
+      if (keys.has(String(raw)) || keys.has(jidLocalPart(String(raw)))) return true
+    }
+    const pPhone = contactPhoneDigits({
+      id: p.id,
+      phoneNumber: p.phoneNumber ?? undefined,
+      lid: p.lid ?? undefined,
+    })
+    return Boolean(selfPhone && pPhone && selfPhone === pPhone)
+  })
+}
+
 export function participantMatchesSystem(
   participants: Array<string | Pick<Contact, 'id' | 'phoneNumber' | 'lid'>>,
-  systemJid: string
+  systemJid: string,
+  self?: SystemIdentity | null,
 ): boolean {
-  if (!systemJid) return false
-  const sysBare = jidLocalPart(systemJid)
-  const sysIds = new Set(
-    [systemJid, sysBare].filter(Boolean)
-  )
-  for (const p of participants) {
-    const cands =
-      typeof p === 'string'
-        ? [p, jidLocalPart(p)]
-        : [p.id, p.phoneNumber, p.lid, jidLocalPart(p.id), jidLocalPart(p.phoneNumber ?? ''), jidLocalPart(p.lid ?? '')]
-    for (const c of cands) {
-      if (c && sysIds.has(c)) return true
-    }
-  }
-  return false
+  const identity = self ?? (systemJid ? { id: systemJid } : null)
+  if (!identity) return false
+  const normalized = participants.map((p) =>
+    typeof p === 'string' ? { id: p } : p,
+  ) as Array<{ id: string; phoneNumber?: string | null; lid?: string | null }>
+  return Boolean(findSelfParticipant(normalized, identity))
 }
 
 /**

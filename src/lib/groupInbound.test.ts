@@ -4,6 +4,7 @@ import {
   resolveWebhookFrom,
   contactPhoneDigits,
   pickPnDigits,
+  findSelfParticipant,
 } from './groupInbound'
 
 function main(): void {
@@ -56,6 +57,21 @@ function main(): void {
     '972509999999',
     'pickPnDigits must skip @lid candidates',
   )
+
+  const lidSelf = findSelfParticipant(
+    [
+      { id: '972509999999@s.whatsapp.net', admin: null },
+      { id: '203358262571163@lid', phoneNumber: '972501234567@s.whatsapp.net', admin: 'admin' },
+    ],
+    { id: '972501234567:61@s.whatsapp.net', phoneNumber: '972501234567@s.whatsapp.net' },
+  )
+  assert.strictEqual(lidSelf?.admin, 'admin', 'admin check must match phone JID to LID roster row')
+
+  const phoneSelf = findSelfParticipant(
+    [{ id: '972501234567@s.whatsapp.net', admin: 'superadmin' }],
+    { id: '203358262571163@lid', phoneNumber: '972501234567@s.whatsapp.net', lid: '203358262571163@lid' },
+  )
+  assert.strictEqual(phoneSelf?.admin, 'superadmin', 'admin check must match LID session to phone roster row')
 
   console.log('groupInbound.test.ts: all checks passed')
 }
