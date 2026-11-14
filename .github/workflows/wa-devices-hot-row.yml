@@ -6,6 +6,8 @@ on:
       - 'src/lib/disconnectReason.ts'
       - 'src/lib/webhookDispatcher*.ts'
       - 'src/lib/webhookHealth.ts'
+      - 'src/lib/webhookIntegrity*'
+      - 'src/providers/baileys/baileysProvider.ts'
       - 'package.json'
       - '.github/workflows/wa-devices-hot-row.yml'
 permissions:

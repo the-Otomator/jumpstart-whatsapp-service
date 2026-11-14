@@ -55,7 +55,7 @@ import {
   requireWebhookUrl,
   WEBHOOK_URL_REQUIRED,
 } from '../../lib/webhookUrl'
-import { resolveSessionWebhookUrl } from '../../lib/sessionWebhookUrl'
+import * as sessionWebhookUrl from '../../lib/sessionWebhookUrl'
 import { useHardenedMultiFileAuthState } from '../../lib/hardenedMultiFileAuthState'
 import {
   acquireSessionLock,
@@ -756,7 +756,7 @@ export class BaileysProvider implements WhatsAppProvider {
       }
       if (!eligible()) continue
       try {
-        const webhookUrl = await resolveSessionWebhookUrl(orgId)
+        const webhookUrl = await sessionWebhookUrl.resolveSessionWebhookUrl(orgId)
         // A manual connect/stop may have happened while resolving the registry.
         if (!webhookUrl || !eligible()) continue
         orgLogger(orgId).info('Periodic recovery: reconnecting registered session')
@@ -789,7 +789,7 @@ export class BaileysProvider implements WhatsAppProvider {
       if (meta?.provider === 'meta-cloud' || meta?.autoRestore === false) continue
       if (!meta && !hasStoredLoginIdentity(orgId)) continue
 
-      const webhookUrl = await resolveSessionWebhookUrl(orgId)
+      const webhookUrl = await sessionWebhookUrl.resolveSessionWebhookUrl(orgId)
       if (!webhookUrl) {
         const lastError = `${WEBHOOK_URL_REQUIRED}: registry and persisted meta have no usable webhookUrl`
         logger.error({ orgId }, 'Skipping restore: no usable webhookUrl')
