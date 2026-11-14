@@ -146,7 +146,12 @@ async function testRestoreUsesRegistryWithoutMeta(): Promise<void> {
     const webhookUrl = 'https://registry.example.test/functions/v1/wa-incoming'
     const dir = path.join(tmp, 'sessions', orgId)
     fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(path.join(dir, 'creds.json'), '{}', 'utf8')
+    // hasStoredLoginIdentity requires creds.me.id; empty {} is skipped before registry resolve.
+    fs.writeFileSync(
+      path.join(dir, 'creds.json'),
+      JSON.stringify({ me: { id: '972500000000:1@s.whatsapp.net' } }),
+      'utf8'
+    )
 
     ;(sessionWebhookUrl as any).resolveSessionWebhookUrl = async (sessionKey: string) =>
       sessionKey === orgId ? webhookUrl : undefined
